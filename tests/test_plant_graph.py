@@ -253,3 +253,61 @@ async def test_extractor_with_mocked_openai():
     assert "variegated_foliage" in extracted.traits_queries
     assert extractor.resolve_species_id(extracted.species_query) == "monstera_deliciosa"
     assert extractor.resolve_substrate_id(extracted.substrate_query) == "inert_soilless"
+
+
+# ============================================================================
+# 7. Multi-Turn Conversation & State Accumulation Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_graph_multi_turn_state_accumulation(kb_manager: KnowledgeBaseManager):
+    """
+    Multi-turn conversation test:
+    - Step 1: User specifies species & trait ('مونسترا ابلق دارم') -> missing substrate asked directly.
+    - Step 2: User provides substrate ('کوکوپیت') with same session -> cumulative state preserves species,
+              and 4-week calendar schedule is generated without asking again.
+    """
+    graph = create_plant_care_graph(kb_manager=kb_manager)
+
+    # Step 1: Send 'مونسترا ابلق دارم'
+    turn1_input: PlantCareState = {
+        "user_id": "user_multiturn",
+        "session_id": "sess_multiturn_1",
+        "user_message": "مونسترا ابلق دارم",
+    }
+    state_turn1 = await graph.ainvoke(turn1_input)
+
+    assert state_turn1.get("resolved_species_id") == "monstera_deliciosa"
+    assert "variegated_foliage" in state_turn1.get("resolved_trait_ids", [])
+    assert state_turn1.get("resolved_substrate_id") is None
+    assert state_turn1.get("missing_slots") == ["substrate"]
+
+    response1 = state_turn1.get("final_response", "")
+    assert "خاک" in response1 or "بستر" in response1
+    # Verify no repeated generic welcome greeting when plant species is already recognized
+    assert "سلام! من **فیتوایجنت**" not in response1
+
+    # Step 2: Send 'کوکوپیت' accumulating previous state
+    turn2_input: PlantCareState = {
+        **state_turn1,
+        "user_message": "کوکوپیت",
+    }
+    state_turn2 = await graph.ainvoke(turn2_input)
+
+    assert state_turn2.get("resolved_species_id") == "monstera_deliciosa"
+    assert "variegated_foliage" in state_turn2.get("resolved_trait_ids", [])
+    assert state_turn2.get("resolved_substrate_id") == "inert_soilless"
+    assert len(state_turn2.get("missing_slots", [])) == 0
+
+    schedule = state_turn2.get("calculated_schedule")
+    assert schedule is not None
+    assert "10-10-30" in schedule["applied_npk_ratio"] or "12-12-36" in schedule["applied_npk_ratio"]
+    assert len(schedule["weeks"]) == 4
+
+    response2 = state_turn2.get("final_response", "")
+    assert "برگ‌انجیری" in response2 or "مونسترا" in response2
+    assert "کوکوپیت" in response2
+    assert "هفته ۱" in response2
+    assert "سلام! من **فیتوایجنت**" not in response2
+

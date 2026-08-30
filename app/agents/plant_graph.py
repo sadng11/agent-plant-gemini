@@ -94,34 +94,57 @@ class PlantDiagnosticGraph:
     async def node_extract_and_resolve(self, state: PlantCareState) -> Dict[str, Any]:
         user_message = state.get("user_message", "")
 
-        # 1. Extract entities using Extractor Service (or reuse if pre-populated)
-        extracted = state.get("extracted_entities")
-        if not extracted:
-            extracted_obj = await self.extractor.extract_entities_from_message(user_message)
-            extracted = extracted_obj.model_dump()
-        else:
-            extracted_obj = ExtractedPlantEntities(**extracted)
+        # 1. Extract entities using Extractor Service for incoming message
+        new_extracted_obj = await self.extractor.extract_entities_from_message(user_message)
 
-        # 2. Resolve IDs
-        species_id = state.get("resolved_species_id") or self.extractor.resolve_species_id(extracted_obj.species_query)
-        substrate_id = state.get("resolved_substrate_id") or self.extractor.resolve_substrate_id(extracted_obj.substrate_query)
-        trait_ids = state.get("resolved_trait_ids") or self.extractor.resolve_trait_ids(extracted_obj.traits_queries)
-        phase_id = state.get("resolved_phase_id") or self.extractor.resolve_phase_id(extracted_obj.phase_query)
+        # 2. Resolve IDs from new extraction
+        new_species = self.extractor.resolve_species_id(new_extracted_obj.species_query)
+        new_substrate = self.extractor.resolve_substrate_id(new_extracted_obj.substrate_query)
+        new_traits = self.extractor.resolve_trait_ids(new_extracted_obj.traits_queries)
+        new_phase = self.extractor.resolve_phase_id(new_extracted_obj.phase_query)
 
-        # 3. Identify missing critical slots
+        # 3. Incremental State Merge (preserve existing values if new message is empty)
+        species_id = new_species or state.get("resolved_species_id")
+        substrate_id = new_substrate or state.get("resolved_substrate_id")
+
+        prev_traits = state.get("resolved_trait_ids") or []
+        trait_ids = list(dict.fromkeys(prev_traits + (new_traits or [])))
+
+        phase_id = new_phase or state.get("resolved_phase_id")
+
+        # Merge raw extraction dictionaries for history
+        prev_extracted = state.get("extracted_entities") or {}
+        merged_extracted = {
+            "species_query": new_extracted_obj.species_query or prev_extracted.get("species_query"),
+            "substrate_query": new_extracted_obj.substrate_query or prev_extracted.get("substrate_query"),
+            "traits_queries": list(dict.fromkeys((prev_extracted.get("traits_queries") or []) + (new_extracted_obj.traits_queries or []))),
+            "phase_query": new_extracted_obj.phase_query or prev_extracted.get("phase_query"),
+            "user_goal": new_extracted_obj.user_goal or prev_extracted.get("user_goal"),
+            "reported_symptoms": list(dict.fromkeys((prev_extracted.get("reported_symptoms") or []) + (new_extracted_obj.reported_symptoms or []))),
+            "missing_critical_info": [],
+        }
+
+        # 4. Identify missing critical slots across cumulative state
         missing_slots: List[str] = []
         if not species_id:
             missing_slots.append("species")
         if not substrate_id:
             missing_slots.append("substrate")
+        merged_extracted["missing_critical_info"] = missing_slots
 
-        # 4. Fetch Knowledge Base records if resolved
-        species_data: Optional[Dict[str, Any]] = None
-        substrate_data: Optional[Dict[str, Any]] = None
-        traits_data: List[Dict[str, Any]] = []
-        phase_data: Optional[Dict[str, Any]] = None
+        # 5. Fetch Knowledge Base records if resolved (reuse existing or load new)
+        species_data: Optional[Dict[str, Any]] = (
+            state.get("species_data") if (species_id == state.get("resolved_species_id") and state.get("species_data")) else None
+        )
+        substrate_data: Optional[Dict[str, Any]] = (
+            state.get("substrate_data") if (substrate_id == state.get("resolved_substrate_id") and state.get("substrate_data")) else None
+        )
+        traits_data: List[Dict[str, Any]] = list(state.get("traits_data") or [])
+        phase_data: Optional[Dict[str, Any]] = (
+            state.get("phase_data") if (phase_id == state.get("resolved_phase_id") and state.get("phase_data")) else None
+        )
 
-        if species_id:
+        if species_id and not species_data:
             try:
                 sp_model = self.kb.get_species(species_id)
                 species_data = sp_model.model_dump()
@@ -129,7 +152,7 @@ class PlantDiagnosticGraph:
                 logger.warning(f"Could not load species {species_id}: {exc}")
                 missing_slots.append("species")
 
-        if substrate_id:
+        if substrate_id and not substrate_data:
             try:
                 sub_model = self.kb.get_substrate(substrate_id)
                 substrate_data = sub_model.model_dump()
@@ -138,14 +161,16 @@ class PlantDiagnosticGraph:
                 missing_slots.append("substrate")
 
         if trait_ids:
+            existing_trait_ids = {t.get("trait_id") for t in traits_data if isinstance(t, dict)}
             for t_id in trait_ids:
-                try:
-                    t_model = self.kb.get_trait(t_id)
-                    traits_data.append(t_model.model_dump())
-                except Exception as exc:
-                    logger.warning(f"Could not load trait {t_id}: {exc}")
+                if t_id not in existing_trait_ids:
+                    try:
+                        t_model = self.kb.get_trait(t_id)
+                        traits_data.append(t_model.model_dump())
+                    except Exception as exc:
+                        logger.warning(f"Could not load trait {t_id}: {exc}")
 
-        if phase_id:
+        if phase_id and not phase_data:
             try:
                 ph_model = self.kb.get_phase(phase_id)
                 phase_data = ph_model.model_dump()
@@ -153,7 +178,7 @@ class PlantDiagnosticGraph:
                 logger.warning(f"Could not load phase {phase_id}: {exc}")
 
         return {
-            "extracted_entities": extracted,
+            "extracted_entities": merged_extracted,
             "resolved_species_id": species_id,
             "resolved_substrate_id": substrate_id,
             "resolved_trait_ids": trait_ids,
@@ -337,19 +362,43 @@ class PlantDiagnosticGraph:
 
         # Branch 1: Missing critical slots
         if missing_slots:
-            questions = []
-            if "species" in missing_slots:
-                questions.append("۱. نام یا گونه گیاه شما چیست؟ (مثلاً برگ‌انجیری، درخت لیمو و...)")
-            if "substrate" in missing_slots:
-                questions.append("۲. گیاه در چه نوع خاکی کاشته شده است؟ (مثلاً کوکوپیت و پرلیت، خاک سنگین و باغچه‌ای، بستر اروید یا هیدروپونیک)")
+            # Case 1.1: Initial turn when neither species nor substrate is known
+            if "species" in missing_slots and "substrate" in missing_slots:
+                questions = [
+                    "۱. نام یا گونه گیاه شما چیست؟ (مثلاً برگ‌انجیری، درخت لیمو و...)",
+                    "۲. گیاه در چه نوع خاکی کاشته شده است؟ (مثلاً کوکوپیت و پرلیت، خاک سنگین و باغچه‌ای، بستر اروید یا هیدروپونیک)",
+                ]
+                response = (
+                    "سلام! من **فیتوایجنت**، متخصص گیاه‌پزشکی و اگرونومی شما هستم. 🌱\n\n"
+                    "برای اینکه بتوانم یک نسخه دقیق، علمی و بدون ریسک برای گیاه شما تجویز کنم، نیاز به تکمیل اطلاعات زیر دارم:\n\n"
+                    + "\n".join(questions)
+                    + "\n\nلطفاً این موارد را بفرمایید تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
+                )
+                return {"final_response": response}
 
-            response = (
-                "سلام! من **فیتوایجنت**، متخصص گیاه‌پزشکی و اگرونومی شما هستم. 🌱\n\n"
-                "برای اینکه بتوانم یک نسخه دقیق، علمی و بدون ریسک برای گیاه شما تجویز کنم، نیاز به تکمیل اطلاعات زیر دارم:\n\n"
-                + "\n".join(questions)
-                + "\n\nلطفاً این موارد را بفرمایید تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
-            )
-            return {"final_response": response}
+            # Case 1.2: Species is identified, asking specifically for substrate
+            if "substrate" in missing_slots:
+                species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
+                trait_labels = [t.get("label") for t in (state.get("traits_data") or []) if t.get("label")]
+                plant_desc = f"{species_name} {' '.join(trait_labels)}".strip() if trait_labels else species_name
+                response = (
+                    f"متشکرم. برای گیاه **{plant_desc}** شما، لطفاً بفرمایید نوع خاک یا بستر کشت چیست؟\n\n"
+                    f"🌱 **گزینه‌های متداول:**\n"
+                    f"- بستر کوکوپیت و پرلیت (بدون خاک / Soilless)\n"
+                    f"- خاک سنگین، رسی یا باغچه‌ای\n"
+                    f"- بستر متخلخل اروید میکس (پوسته درخت، پیت‌ماس و لکا)\n"
+                    f"- سیستم هیدروپونیک یا سمی‌هیدرو (لکا/پون)"
+                )
+                return {"final_response": response}
+
+            # Case 1.3: Substrate is identified, asking specifically for species
+            if "species" in missing_slots:
+                substrate_name = substrate_data.get("label", "بستر انتخابی شما") if substrate_data else "بستر انتخابی شما"
+                response = (
+                    f"متشکرم. بستر کشت (**{substrate_name}**) ثبت شد.\n\n"
+                    f"لطفاً نام یا گونه گیاه خود را بفرمایید (مثلاً برگ‌انجیری، درخت لیمو، سانسوریا و...) تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
+                )
+                return {"final_response": response}
 
         # Branch 2: Substrate is Critical Blocker
         if risk_level == "CRITICAL_BLOCKER":

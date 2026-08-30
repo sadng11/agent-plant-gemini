@@ -27,6 +27,29 @@ class ChatResponse(BaseModel):
     extracted_entities: Optional[Dict[str, Any]] = Field(default=None, description="Entities parsed from user message")
 
 
+class ChatMessageResponse(BaseModel):
+    """Schema for individual message in chat history."""
+    id: str = Field(..., description="Message UUID")
+    session_id: str = Field(..., description="Session UUID")
+    sender: str = Field(..., description="Sender: 'user' or 'agent'")
+    content: str = Field(..., description="Message text content")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="Diagnostic telemetry and metadata")
+    created_at: Optional[str] = Field(default=None, description="ISO timestamp")
+
+
+class ChatSessionResponse(BaseModel):
+    """Schema for chat conversation session summary."""
+    id: str = Field(..., description="Session UUID")
+    user_id: str = Field(..., description="Owner user ID")
+    plant_id: Optional[str] = Field(default=None, description="Referenced plant UUID")
+    title: str = Field(..., description="Conversation title")
+    created_at: Optional[str] = Field(default=None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(default=None, description="Last update timestamp")
+    message_count: int = Field(default=0, description="Total number of messages in session")
+    last_message: Optional[str] = Field(default=None, description="Snippet of the latest message")
+
+
+
 # ============================================================================
 # 2. Digital Twin Garden Schemas
 # ============================================================================

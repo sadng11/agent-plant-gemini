@@ -1,33 +1,108 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+
 import { chatApi } from '../api/chatApi';
 import { usePlantStore } from './usePlantStore';
-import type { UIMessage } from '../types/chat';
+import type { ChatSessionInfo, UIMessage } from '../types/chat';
+
+const ACTIVE_SESSION_KEY = 'phyto_active_session_id';
 
 export const useChatStore = defineStore('chat', () => {
   const plantStore = usePlantStore();
 
-  const messages = ref<UIMessage[]>([
-    {
-      id: 'welcome-msg',
-      sender: 'agent',
-      text: 'سلام و درود 🌱 من «فیتوایجنت»، دستیار تخصصی گیاه‌پزشکی و برنامه‌ریزی تغذیه گیاهان شما هستم.\n\nمی‌توانید وضعیت یا مشکل گیاهتان (مانند زردی برگ، توقف رشد، برنامه کودی مناسب، نوع بستر و...) را مطرح کنید یا از باغچه خود یکی از گیاهان را برای مشاوره اختصاصی انتخاب نمایید.',
-      timestamp: new Date(),
-    },
-  ]);
+  const welcomeMessage: UIMessage = {
+    id: 'welcome-msg',
+    sender: 'agent',
+    text: 'سلام و درود 🌱 من «فیتوایجنت»، دستیار تخصصی گیاه‌پزشکی و برنامه‌ریزی تغذیه گیاهان شما هستم.\n\nمی‌توانید وضعیت یا مشکل گیاهتان (مانند زردی برگ، توقف رشد، برنامه کودی مناسب، نوع بستر و...) را مطرح کنید یا از باغچه خود یکی از گیاهان را برای مشاوره اختصاصی انتخاب نمایید.',
+    timestamp: new Date(),
+  };
 
-  const sessionId = ref<string>('');
+  const messages = ref<UIMessage[]>([welcomeMessage]);
+  const sessions = ref<ChatSessionInfo[]>([]);
+  const sessionId = ref<string>(localStorage.getItem(ACTIVE_SESSION_KEY) || '');
   const selectedPlantId = ref<string | null>(null);
   const isLoading = ref<boolean>(false);
+  const isLoadingSessions = ref<boolean>(false);
   const error = ref<string | null>(null);
   const activeQuickSlots = ref<string[]>([]);
 
+  /**
+   * Load all chat sessions for the active user
+   */
+  async function loadSessions(plantIdFilter?: string) {
+    if (!plantStore.activeUserId) return;
+    isLoadingSessions.value = true;
+    try {
+      const data = await chatApi.getSessions(plantStore.activeUserId, plantIdFilter);
+      sessions.value = data;
+    } catch (err: any) {
+      console.error('Failed to load chat sessions:', err);
+    } finally {
+      isLoadingSessions.value = false;
+    }
+  }
+
+  /**
+   * Load message history from DB for a specific session ID
+   */
+  async function loadActiveSessionMessages(targetSessionId: string) {
+    if (!targetSessionId) return;
+
+    isLoading.value = true;
+    error.value = null;
+    try {
+      const history = await chatApi.getSessionMessages(targetSessionId, plantStore.activeUserId);
+      if (history && history.length > 0) {
+        messages.value = history.map((m) => ({
+          id: m.id,
+          sender: m.sender,
+          text: m.content,
+          timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+          plant_id: m.payload?.plant_id || null,
+          risk_level: m.payload?.risk_level || null,
+          feasibility_status: m.payload?.feasibility_status || null,
+          calculated_schedule: m.payload?.calculated_schedule || null,
+          missing_slots: m.payload?.missing_slots || [],
+          extracted_entities: m.payload?.extracted_entities || null,
+        }));
+
+        // Check if last message has missing slots
+        const lastMsg = history[history.length - 1];
+        if (lastMsg.sender === 'agent' && lastMsg.payload?.missing_slots?.length) {
+          deriveQuickSlots(lastMsg.payload.missing_slots);
+        } else {
+          activeQuickSlots.value = [];
+        }
+
+        // Set plant context if session is associated with a plant
+        const currentSession = sessions.value.find((s) => s.id === targetSessionId);
+        if (currentSession && currentSession.plant_id) {
+          selectedPlantId.value = currentSession.plant_id;
+        }
+      } else {
+        messages.value = [welcomeMessage];
+        activeQuickSlots.value = [];
+      }
+
+      sessionId.value = targetSessionId;
+      localStorage.setItem(ACTIVE_SESSION_KEY, targetSessionId);
+    } catch (err: any) {
+      console.error('Failed to load session messages:', err);
+      error.value = 'خطا در واکشی تاریخچه گفتگو از سرور';
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /**
+   * Send user message to agent and persist turn
+   */
   async function sendMessage(text: string, plantIdOverride?: string) {
     if (!text.trim()) return;
 
     const targetPlantId = plantIdOverride !== undefined ? plantIdOverride : selectedPlantId.value;
 
-    // Add user message to UI
+    // Optimistically add user message to UI
     const userMsg: UIMessage = {
       id: 'user-' + Date.now(),
       sender: 'user',
@@ -49,12 +124,13 @@ export const useChatStore = defineStore('chat', () => {
         plant_id: targetPlantId || undefined,
       });
 
-      // Update session ID if returned
+      // Update session ID if created or returned
       if (response.session_id) {
         sessionId.value = response.session_id;
+        localStorage.setItem(ACTIVE_SESSION_KEY, response.session_id);
       }
 
-      // Add agent message
+      // Add agent message to UI
       const agentMsg: UIMessage = {
         id: 'agent-' + Date.now(),
         sender: 'agent',
@@ -76,6 +152,9 @@ export const useChatStore = defineStore('chat', () => {
         activeQuickSlots.value = [];
       }
 
+      // Refresh sessions list in background
+      await loadSessions();
+
       // If backend updated or linked a plant, refresh plants
       if (response.plant_id) {
         await plantStore.fetchPlants();
@@ -96,7 +175,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function deriveQuickSlots(missingSlots: string[]) {
     const suggestions: string[] = [];
-    if (missingSlots.includes('substrate_type')) {
+    if (missingSlots.includes('substrate_type') || missingSlots.includes('substrate')) {
       suggestions.push('خاک سبک و آروئید میکس');
       suggestions.push('کوکوپیت و پرلیت');
       suggestions.push('خاک باغچه‌ای و سنگین');
@@ -121,29 +200,80 @@ export const useChatStore = defineStore('chat', () => {
     selectedPlantId.value = plantId;
   }
 
-  function clearHistory() {
+  /**
+   * Start a brand new chat session
+   */
+  function startNewSession(plantIdOverride?: string | null) {
     sessionId.value = '';
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
     messages.value = [
       {
-        id: 'welcome-msg-reset',
+        id: 'welcome-msg-new-' + Date.now(),
         sender: 'agent',
         text: 'گفتگوی جدید آغاز شد 🌱 آماده پاسخگویی به سوالات تشخیصی و تغذیه گیاهان شما هستم.',
         timestamp: new Date(),
       },
     ];
     activeQuickSlots.value = [];
+    if (plantIdOverride !== undefined) {
+      selectedPlantId.value = plantIdOverride;
+    }
+  }
+
+  /**
+   * Delete a session and refresh list
+   */
+  async function deleteSession(targetSessionId: string) {
+    try {
+      await chatApi.deleteSession(targetSessionId, plantStore.activeUserId);
+      sessions.value = sessions.value.filter((s) => s.id !== targetSessionId);
+      if (sessionId.value === targetSessionId) {
+        startNewSession();
+      }
+    } catch (err: any) {
+      console.error('Failed to delete session:', err);
+      error.value = 'خطا در حذف گفتگو';
+    }
+  }
+
+  /**
+   * Initialize chat store on app start / component mount
+   */
+  async function init() {
+    await loadSessions();
+    if (sessionId.value) {
+      // Check if session still exists in sessions
+      const exists = sessions.value.some((s) => s.id === sessionId.value);
+      if (exists) {
+        await loadActiveSessionMessages(sessionId.value);
+      } else if (sessions.value.length > 0) {
+        // Load the latest session
+        await loadActiveSessionMessages(sessions.value[0].id);
+      } else {
+        startNewSession();
+      }
+    } else if (sessions.value.length > 0) {
+      await loadActiveSessionMessages(sessions.value[0].id);
+    }
   }
 
   return {
     messages,
+    sessions,
     sessionId,
     selectedPlantId,
     isLoading,
+    isLoadingSessions,
     error,
     activeQuickSlots,
+    loadSessions,
+    loadActiveSessionMessages,
     sendMessage,
     sendQuickSlotAnswer,
     setContextPlant,
-    clearHistory,
+    startNewSession,
+    deleteSession,
+    init,
   };
 });
+

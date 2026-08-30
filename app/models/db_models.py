@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     JSON,
     String,
+    Text,
     Uuid,
     func,
 )
@@ -104,6 +105,13 @@ class UserPlant(Base):
         order_by="desc(PlantEventLog.created_at)",
     )
 
+    # Relationship to ChatSession with ondelete SET NULL
+    chat_sessions: Mapped[List["ChatSession"]] = relationship(
+        "ChatSession",
+        back_populates="plant",
+        lazy="selectin",
+    )
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary representation."""
         return {
@@ -186,6 +194,148 @@ class PlantEventLog(Base):
         )
 
 
+class ChatSession(Base):
+    """
+    SQLAlchemy ORM Model representing a multi-turn chat conversation session.
+    """
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+        nullable=False,
+    )
+    plant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("user_plants.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(200),
+        default="گفتگوی تشخیصی",
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # Relationship to ChatMessage with Cascade Delete
+    messages: Mapped[List["ChatMessage"]] = relationship(
+        "ChatMessage",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+        order_by="asc(ChatMessage.created_at)",
+    )
+
+    # Back-reference relationship to UserPlant
+    plant: Mapped[Optional["UserPlant"]] = relationship(
+        "UserPlant",
+        back_populates="chat_sessions",
+        foreign_keys=[plant_id],
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert model instance to dictionary representation."""
+        return {
+            "id": str(self.id),
+            "user_id": self.user_id,
+            "plant_id": str(self.plant_id) if self.plant_id else None,
+            "title": self.title,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatSession(id={self.id}, user_id='{self.user_id}', "
+            f"plant_id={self.plant_id}, title='{self.title}')>"
+        )
+
+
+class ChatMessage(Base):
+    """
+    SQLAlchemy ORM Model representing an individual message turn in a chat session.
+    """
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    sender: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    payload: Mapped[Dict[str, Any]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # Back-reference relationship to ChatSession
+    session: Mapped["ChatSession"] = relationship(
+        "ChatSession",
+        back_populates="messages",
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert model instance to dictionary representation."""
+        return {
+            "id": str(self.id),
+            "session_id": str(self.session_id),
+            "sender": self.sender,
+            "content": self.content,
+            "payload": self.payload,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatMessage(id={self.id}, session_id={self.session_id}, "
+            f"sender='{self.sender}', created_at='{self.created_at}')>"
+        )
+
+
 # Indices for fast queries
 Index("idx_user_plants_user", UserPlant.user_id)
 Index("idx_plant_events_plant", PlantEventLog.plant_id)
+Index("idx_chat_sessions_user", ChatSession.user_id)
+Index("idx_chat_sessions_plant", ChatSession.plant_id)
+Index("idx_chat_messages_session", ChatMessage.session_id)
+Index("idx_chat_messages_created", ChatMessage.created_at)
+

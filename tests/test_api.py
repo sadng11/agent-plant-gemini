@@ -310,3 +310,112 @@ async def test_chat_with_existing_plant_id(client: AsyncClient):
     data = chat_res.json()
     assert data["calculated_schedule"] is not None
     assert "درخت لیمو" in data["response"] or "لیمو" in data["response"]
+
+
+@pytest.mark.asyncio
+async def test_chat_sessions_and_messages_persistence(client: AsyncClient):
+    """Test that chat interactions are persisted in PostgreSQL and can be retrieved via sessions endpoints."""
+    user_id = "user_persist_test"
+    
+    # 1. Send first message
+    chat_req = {
+        "user_id": user_id,
+        "message": "برنامه کوددهی برگ‌انجیری در کوکوپیت چیست؟",
+    }
+    chat_res = await client.post("/api/v1/chat", json=chat_req)
+    assert chat_res.status_code == 200
+    res_data = chat_res.json()
+    session_id = res_data["session_id"]
+    assert session_id is not None
+
+    # 2. Get user sessions list
+    sessions_res = await client.get("/api/v1/chat/sessions", params={"user_id": user_id})
+    assert sessions_res.status_code == 200
+    sessions_list = sessions_res.json()
+    assert len(sessions_list) == 1
+    session_info = sessions_list[0]
+    assert session_info["id"] == session_id
+    assert session_info["user_id"] == user_id
+    assert session_info["message_count"] == 2  # 1 user + 1 agent
+    assert "برنامه کوددهی برگ‌انجیری" in session_info["title"]
+
+    # 3. Retrieve messages for this session
+    msgs_res = await client.get(f"/api/v1/chat/sessions/{session_id}/messages", params={"user_id": user_id})
+    assert msgs_res.status_code == 200
+    messages = msgs_res.json()
+    assert len(messages) == 2
+    
+    # Verify user message
+    assert messages[0]["sender"] == "user"
+    assert "برنامه کوددهی برگ‌انجیری" in messages[0]["content"]
+
+    # Verify agent message and payload
+    assert messages[1]["sender"] == "agent"
+    assert messages[1]["payload"] is not None
+    assert "calculated_schedule" in messages[1]["payload"]
+    assert "risk_level" in messages[1]["payload"]
+
+    # 4. Send follow-up message in the same session
+    followup_req = {
+        "user_id": user_id,
+        "session_id": session_id,
+        "message": "در فاز گلدهی چطور؟",
+    }
+    followup_res = await client.post("/api/v1/chat", json=followup_req)
+    assert followup_res.status_code == 200
+    assert followup_res.json()["session_id"] == session_id
+
+    # Verify message count increased to 4
+    msgs_res_2 = await client.get(f"/api/v1/chat/sessions/{session_id}/messages", params={"user_id": user_id})
+    assert msgs_res_2.status_code == 200
+    assert len(msgs_res_2.json()) == 4
+
+    # 5. Delete session
+    del_res = await client.delete(f"/api/v1/chat/sessions/{session_id}", params={"user_id": user_id})
+    assert del_res.status_code == 204
+
+    # Verify session and messages are deleted
+    sessions_res_after = await client.get("/api/v1/chat/sessions", params={"user_id": user_id})
+    assert sessions_res_after.status_code == 200
+    assert len(sessions_res_after.json()) == 0
+
+    msgs_res_after = await client.get(f"/api/v1/chat/sessions/{session_id}/messages", params={"user_id": user_id})
+    assert msgs_res_after.status_code == 200
+    assert len(msgs_res_after.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_multi_turn_state_preservation(client: AsyncClient):
+    """Test multi-turn chat over HTTP API: turn 1 gives species, turn 2 gives substrate."""
+    user_id = "user_multiturn_api"
+
+    # Turn 1: "مونسترا ابلق دارم"
+    req_1 = {
+        "user_id": user_id,
+        "message": "مونسترا ابلق دارم",
+    }
+    res_1 = await client.post("/api/v1/chat", json=req_1)
+    assert res_1.status_code == 200
+    data_1 = res_1.json()
+    session_id = data_1["session_id"]
+    assert "substrate" in data_1["missing_slots"]
+    assert "species" not in data_1["missing_slots"]
+    assert "سلام! من **فیتوایجنت**" not in data_1["response"]
+
+    # Turn 2: "کوکوپیت و پرلیت" in same session
+    req_2 = {
+        "user_id": user_id,
+        "session_id": session_id,
+        "message": "کوکوپیت و پرلیت",
+    }
+    res_2 = await client.post("/api/v1/chat", json=req_2)
+    assert res_2.status_code == 200
+    data_2 = res_2.json()
+    assert len(data_2["missing_slots"]) == 0
+    assert data_2["calculated_schedule"] is not None
+    assert "برگ‌انجیری" in data_2["response"] or "مونسترا" in data_2["response"]
+    assert "کوکوپیت" in data_2["response"]
+    assert "هفته ۱" in data_2["response"]
+    assert "سلام! من **فیتوایجنت**" not in data_2["response"]
+
+
