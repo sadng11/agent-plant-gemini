@@ -1,0 +1,78 @@
+substrates:
+  inert_soilless:
+    label: "بستر خنثی و بدون خاک (کوکوپیت / پرلیت / پیت بدون ماده غذایی)"
+    dose_multiplier: 0.7
+    interval_multiplier: 0.8
+    target_ph_range: [5.8, 6.3]
+    mandatory_supplements:
+      - id: "cal_mag"
+        name: "کلسیم-منیزیم (Cal-Mag)"
+        dose: "۱ میلی‌لیتر در لیتر"
+        frequency: "در تمام نوبت‌های کوددهی"
+        reason: "کوکوپیت یون‌های کلسیم و منیزیم را بلوکه می‌کند."
+    runoff_drain_target_pct: 20
+    is_liquid_system: false
+    actions: []
+    warnings:
+      - "بستر فاقد هرگونه ذخیره کاتیونی است؛ قطع کوددهی مساوی با گرسنگی فوری گیاه خواهد بود."
+
+  hydro_and_semi_hydro:
+    label: "هیدروپونیک و سمی‌هیدرو (LECA / Pon / DWC)"
+    is_liquid_system: true
+    target_ph_range: [5.5, 6.2]
+    dose_multiplier: 0.6
+    interval_multiplier: 1.0
+    mandatory_supplements:
+      - id: "hydro_micro"
+        name: "میکروالمنت کلاته‌شده پایدار"
+        dose: "طبق دستور کود هیدروپونیک"
+        frequency: "در هر نوبت تعویض یا شارژ مخزن"
+        reason: "پایداری عناصر کم‌مصرف در محلول آبی و جلوگیری از رسوب."
+    actions:
+      - "enforce_reservoir_flush_days: 14"
+      - "prohibit_thick_organic_extracts: true"
+    warnings:
+      - "استفاده از کودهای آلی غلیظ (مانند عصاره جلبک تصفیه‌نشده یا ماهی) باعث فساد مخزن و خفگی ریشه می‌شود."
+
+  mineral_heavy:
+    label: "خاک سنگین، رسی یا باغچه‌ای فشرده"
+    dose_multiplier: 0.5
+    interval_multiplier: 1.6
+    target_ph_range: [6.5, 7.5]
+    mandatory_supplements:
+      - id: "humic_acid"
+        name: "هیومیک اسید"
+        dose: "۱ گرم در لیتر"
+        frequency: "هر ۳۰ تا ۴۵ روز"
+        reason: "بهبود تهویه و شکستن فشردگی رس."
+    warnings:
+      - "ریسک خفگی ریشه؛ نیاز به خشک شدن حداقل ۶۰٪ عمق خاک قبل از آبیاری مجدد."
+
+  aroid_chunky_mix:
+    label: "بستر درشت‌دانه و متخلخل مخصوص آروئیدها (Chunky Aroid Mix)"
+    dose_multiplier: 1.0
+    interval_multiplier: 1.0
+    target_ph_range: [5.8, 6.8]
+    mandatory_supplements: []
+    runoff_drain_target_pct: 30
+    is_liquid_system: false
+    actions: []
+    warnings:
+      - "به دلیل زهکشی بسیار سریع، آبشویی املاح به راحتی انجام می‌شود ولی فواصل آبیاری باید به دقت پایش شود."
+
+  citrus_well_drained:
+    label: "بستر سبک با زهکشی عالی و کمی اسیدی مخصوص مرکبات"
+    dose_multiplier: 1.0
+    interval_multiplier: 1.0
+    target_ph_range: [6.0, 7.0]
+    mandatory_supplements:
+      - id: "iron_chelate"
+        name: "کلات آهن (Fe-EDDHA / Fe-DTPA)"
+        dose: "۰.۵ تا ۱ گرم در لیتر"
+        frequency: "ماهانه در فصل رشد"
+        reason: "مرکبات نیاز بالایی به آهن در دسترس دارند."
+    runoff_drain_target_pct: 25
+    is_liquid_system: false
+    actions: []
+    warnings:
+      - "تجمع رطوبت در انتهای گلدان موجب پوسیدگی طوقه و فیتوفتورا می‌شود؛ سوراخ‌های زهکش باید کاملاً باز باشند."

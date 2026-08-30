@@ -1,0 +1,48 @@
+traits:
+  variegated_foliage:
+    label: "برگ‌های ابلق / دورنگ"
+    fertilizer_rules:
+      max_nitrogen_cap_pct: 10.0
+      override_npk_ratio: "10-10-30 یا 12-12-36 (پتاسیم بالا)"
+      banned_fertilizers:
+        - "کودهای 30-10-10"
+        - "اوره"
+        - "نیتروژن خالص"
+      mandatory_supplements:
+        - id: "potassium_silicate"
+          name: "سیلیکا (سیلیکات پتاسیم)"
+          dose: "۰.۵ میلی‌لیتر در لیتر"
+          frequency: "هر دو هفته یک‌بار"
+          reason: "استحکام دیواره سلولی بخش‌های سفید برگ و جلوگیری از لکه قهوه‌ای و سوختگی کلروتیک."
+    environmental_adjustments:
+      light_intensity_multiplier: 1.3
+      prohibit_foliar_spray: true
+
+  climbing_aerial_roots:
+    label: "گیاه بالارونده با ریشه‌های هوایی"
+    fertilizer_rules:
+      mandatory_supplements:
+        - id: "seaweed_extract"
+          name: "عصاره جلبک دریایی"
+          dose: "۱ میلی‌لیتر در لیتر"
+          frequency: "ماهانه"
+          reason: "محرک هورمونی ریشه‌زایی هوایی و جذب رطوبت از قیم خزه‌ای."
+    environmental_adjustments:
+      humidity_boost_pct: 15.0
+      prohibit_foliar_spray: false
+
+  heavy_feeder:
+    label: "تغذیه‌کننده سنگین (نیاز غذایی بالا)"
+    fertilizer_rules:
+      dose_multiplier: 1.2
+      override_npk_ratio: null
+      banned_fertilizers: []
+      mandatory_supplements:
+        - id: "amino_acids"
+          name: "اسید آمینه بیواستیمولانت"
+          dose: "۱ میلی‌لیتر در لیتر"
+          frequency: "هر ۳۰ روز یک‌بار"
+          reason: "کاهش تنش رشد و تسریع جذب عناصر پرمصرف."
+    environmental_adjustments:
+      light_intensity_multiplier: 1.1
+      prohibit_foliar_spray: false

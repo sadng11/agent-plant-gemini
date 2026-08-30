@@ -1,0 +1,57 @@
+species_id: "citrus_limon"
+botanical_info:
+  scientific_name: "Citrus limon"
+  persian_name: "لیمو ترش"
+  family: "Rutaceae"
+  growth_rate: "moderate"
+
+tolerances:
+  light_lux:
+    min: 4000
+    optimal_min: 8000
+    optimal_max: 20000
+    max_direct_sun_hours: 8
+  humidity_pct:
+    min: 45
+    optimal: 60
+  temp_celsius:
+    min: 10
+    optimal: 22
+    max: 32
+
+base_feeding:
+  default_npk_ratio: "18-18-18 یا 20-20-20 (همراه با آهن کلاته و روی)"
+  standard_dose_ec: 1.6
+  base_frequency_days: 10
+  foliar_spray_compatible: true
+  sensitive_to_chlorine: true
+
+substrate_requirements:
+  ideal_mix:
+    label: "بستر سبک، با زهکشی بسیار بالا و غنی از مواد آلی (Citrus Mix)"
+    recommended_composition: "پیت‌ماس ۴۰٪ + کمپوست/ورمی‌کمپوست ۲۰٪ + پرلیت/شن درشت ۳۰٪ + پوست درخت خرد شده ۱۰٪"
+  compatibility_rules:
+    mineral_heavy:
+      status: "dangerous"
+      alert_message: "خاک سنگین و رسی باعث خفگی ریشه، پوسیدگی طوقه (Phytophthora) و کلروز آهن شدید می‌شود."
+      action_recommended: "اصلاح زهکشی و تعویض خاک به بستر سبک و شنی/پرلیتی در فصل بهار."
+      interim_care_plan: "آبیاری منحصراً پس از خشک شدن ۵۰٪ عمق خاک، مصرف هیومیک اسید و محلول‌پاشی کلات آهن."
+    inert_soilless:
+      status: "acceptable"
+      note: "مناسب به شرط افزودن مداوم کود کامل هیدروپونیک با کلات آهن Fe-EDDHA و کلسیم-منیزیم."
+    citrus_well_drained:
+      status: "ideal"
+      note: "بهترین شرایط برای رشد رویشی، ریشه‌زایی عمیق و باردهی پایدار مرکبات."
+
+phenology_constraints:
+  fruiting_and_flowering:
+    indoor_feasibility: "moderate_with_growlight"
+    is_fertilizer_driven_only: false
+    mandatory_prerequisites:
+      plant_maturity_years: 2
+      minimum_climbing_height_meters: 0
+      light_requirement: "حداقل ۸۰۰۰ تا ۱۲۰۰۰ لوکس نور مستقیم یا لامپ رشد به مدت ۶ تا ۸ ساعت در روز"
+      ambient_humidity_min_pct: 50
+    advisory_strategy:
+      action: "check_photoperiod_and_dormancy"
+      warning: "گل‌انگیزی در لیمو ترش نیازمند دوره سرمای ملایم زمستانه (استراحت دمایی ۱۰ تا ۱۵ درجه) و نور شدید است؛ افزایش کود فسفر بالا به تنهایی محرک گل‌دهی نخواهد بود."

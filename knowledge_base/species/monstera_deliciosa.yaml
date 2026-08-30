@@ -1,0 +1,57 @@
+species_id: "monstera_deliciosa"
+botanical_info:
+  scientific_name: "Monstera deliciosa"
+  persian_name: "برگ‌انجیری (مونسترا)"
+  family: "Araceae"
+  growth_rate: "moderate_to_fast"
+
+tolerances:
+  light_lux:
+    min: 1500
+    optimal_min: 2500
+    optimal_max: 5000
+    max_direct_sun_hours: 1
+  humidity_pct:
+    min: 40
+    optimal: 65
+  temp_celsius:
+    min: 16
+    optimal: 24
+    max: 30
+
+base_feeding:
+  default_npk_ratio: "3-1-2 یا 20-20-20"
+  standard_dose_ec: 1.2
+  base_frequency_days: 14
+  foliar_spray_compatible: true
+  sensitive_to_chlorine: true
+
+substrate_requirements:
+  ideal_mix:
+    label: "بستر سبک، هوادهی بالا و متخلخل (Aroid Mix)"
+    recommended_composition: "پوست درخت ۴۰٪ + پیت‌ماس/کوکو ۳۰٪ + پرلیت درشت ۲۰٪ + زغال ۱۰٪"
+  compatibility_rules:
+    mineral_heavy:
+      status: "dangerous"
+      alert_message: "خاک سنگین و رسی باعث خفگی ریشه و پوسیدگی حتمی طوقه می‌شود."
+      action_recommended: "تعویض گلدان و بستر (Repotting) در اولین فرصت."
+      interim_care_plan: "آبیاری پس از خشک شدن ۷۰٪ خاک، کاهش دوز کود به ۵۰٪ همراه هیومیک اسید."
+    inert_soilless:
+      status: "acceptable"
+      note: "مناسب با الزام مصرف مداوم Cal-Mag."
+    aroid_chunky_mix:
+      status: "ideal"
+      note: "بهترین شرایط برای رشد و توسعه ریشه‌های هوایی."
+
+phenology_constraints:
+  fruiting_and_flowering:
+    indoor_feasibility: "extremely_rare"
+    is_fertilizer_driven_only: false
+    mandatory_prerequisites:
+      plant_maturity_years: 5
+      minimum_climbing_height_meters: 3
+      light_requirement: "نور فیلترشده بسیار قوی بالای ۵۰۰۰ لوکس"
+      ambient_humidity_min_pct: 75
+    advisory_strategy:
+      action: "explain_prerequisites_first"
+      warning: "مصرف بی‌رویه کود فسفر بالا در آپارتمان فقط باعث شوری بستر و سوختگی ریشه می‌شود."

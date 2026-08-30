@@ -1,0 +1,56 @@
+phases:
+  flowering_and_fruit_set:
+    label: "فاز گل‌دهی و تشکیل میوه"
+    fertilizer_rules:
+      suppress_high_nitrogen: true
+      override_npk_ratio: "10-52-10 (فسفر بالا) یا 0-52-34 (MKP)"
+      mandatory_supplements:
+        - id: "fruit_set_combo"
+          name: "فروت‌ست (کلسیم-بور + روی)"
+          dose: "۱ میلی‌لیتر در لیتر"
+          frequency: "شروع باز شدن گل‌ها تا فندقی شدن میوه"
+          reason: "تثبیت دانه گرده و ممانعت از تشکیل لایه جداکننده دمگل."
+    watering_rules:
+      stability_mode: true
+      warning: "نوسان در آبیاری باعث ریزش قطعی گل‌ها و سقط میوه‌های نوچه می‌شود."
+
+  active_vegetative:
+    label: "رشد رویشی فعال"
+    fertilizer_rules:
+      allow_high_nitrogen: true
+      recommended_ratio: "20-20-20 یا 3-1-2"
+      supplements:
+        - "جلبک دریایی"
+      mandatory_supplements: []
+    watering_rules:
+      stability_mode: false
+      warning: null
+
+  dormant_or_slow_growth:
+    label: "رکود زمستانه یا توقف رشد ناشی از افت دما/نور"
+    fertilizer_rules:
+      suppress_high_nitrogen: true
+      dose_multiplier: 0.3
+      interval_multiplier: 2.0
+      recommended_ratio: "توقف کامل کوددهی یا دوز بسیار رقیق هیومیک اسید"
+      mandatory_supplements: []
+    watering_rules:
+      stability_mode: false
+      warning: "به دلیل افت تبخیر و تعرق، فواصل آبیاری باید حداقل ۱.۵ تا ۲ برابر طولانی‌تر شود."
+
+  repotting_recovery:
+    label: "دوره ریکاوری پس از تعویض گلدان و بستر"
+    fertilizer_rules:
+      suppress_high_nitrogen: true
+      override_npk_ratio: null
+      banned_fertilizers:
+        - "تمام کودهای شیمیایی ماکرو و میکرو با EC بالای ۰.۵"
+      mandatory_supplements:
+        - id: "humic_acid"
+          name: "هیومیک اسید + ریشه‌زا"
+          dose: "۱ گرم در لیتر"
+          frequency: "نوبت اول و دوم آبیاری پس از تعویض"
+          reason: "ترمیم مویرگ‌های آسیب‌دیده ریشه و پیشگیری از شوک تعویض بستر."
+    watering_rules:
+      stability_mode: true
+      warning: "خاک نباید باتلاقی شود ولی رطوبت ملایم یکنواخت برای تحریک رشد ریشه جدید حیاتی است."
