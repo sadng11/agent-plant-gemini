@@ -1,20 +1,12 @@
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import (
-    AsyncAttrs,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
-
-
-class Base(AsyncAttrs, DeclarativeBase):
-    """
-    Base class for all SQLAlchemy ORM models with async attribute support.
-    """
-    pass
+from app.db.base import Base
 
 
 # Default Async Engine
@@ -50,7 +42,10 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
 async def init_db(target_engine: Optional[AsyncEngine] = None) -> None:
     """
     Create all tables defined in Base metadata.
+    Explicitly imports db_models to guarantee all models are registered in Base.metadata.
     """
+    import app.models.db_models  # noqa: F401
+
     eng = target_engine or engine
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -60,6 +55,8 @@ async def drop_db(target_engine: Optional[AsyncEngine] = None) -> None:
     """
     Drop all tables defined in Base metadata.
     """
+    import app.models.db_models  # noqa: F401
+
     eng = target_engine or engine
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
