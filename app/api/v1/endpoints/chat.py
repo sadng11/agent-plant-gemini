@@ -48,6 +48,8 @@ async def chat_diagnostic(
     prev_trait_ids: List[str] = []
     prev_phase_id: Optional[str] = None
     prev_health_status: str = "UNKNOWN"
+    prev_health_confirmed: Optional[bool] = None
+    prev_trait_confirmed: Optional[bool] = None
     prev_intent: Optional[str] = None
     prev_reported_symptoms: List[str] = []
     prev_extracted: Dict[str, Any] = {}
@@ -59,12 +61,16 @@ async def chat_diagnostic(
                 prev_species_id = m.payload["resolved_species_id"]
             if m.payload.get("resolved_substrate_id"):
                 prev_substrate_id = m.payload["resolved_substrate_id"]
-            if m.payload.get("resolved_trait_ids"):
-                prev_trait_ids = list(dict.fromkeys(prev_trait_ids + (m.payload["resolved_trait_ids"] or [])))
+            if "resolved_trait_ids" in m.payload:
+                prev_trait_ids = m.payload["resolved_trait_ids"] or []
             if m.payload.get("resolved_phase_id"):
                 prev_phase_id = m.payload["resolved_phase_id"]
             if m.payload.get("health_status"):
                 prev_health_status = m.payload["health_status"]
+            if "health_confirmed" in m.payload and m.payload["health_confirmed"] is not None:
+                prev_health_confirmed = m.payload["health_confirmed"]
+            if "trait_confirmed" in m.payload and m.payload["trait_confirmed"] is not None:
+                prev_trait_confirmed = m.payload["trait_confirmed"]
             if m.payload.get("intent"):
                 prev_intent = m.payload["intent"]
             if m.payload.get("reported_symptoms"):
@@ -97,6 +103,8 @@ async def chat_diagnostic(
         "resolved_trait_ids": prev_trait_ids,
         "resolved_phase_id": prev_phase_id,
         "health_status": prev_health_status,
+        "health_confirmed": prev_health_confirmed,
+        "trait_confirmed": prev_trait_confirmed,
         "intent": prev_intent,
         "reported_symptoms": prev_reported_symptoms,
         "extracted_entities": prev_extracted if prev_extracted else None,
@@ -117,6 +125,8 @@ async def chat_diagnostic(
         "resolved_trait_ids": final_state.get("resolved_trait_ids", []),
         "resolved_phase_id": final_state.get("resolved_phase_id"),
         "health_status": final_state.get("health_status"),
+        "health_confirmed": final_state.get("health_confirmed"),
+        "trait_confirmed": final_state.get("trait_confirmed"),
         "intent": final_state.get("intent"),
         "reported_symptoms": final_state.get("reported_symptoms", []),
     }

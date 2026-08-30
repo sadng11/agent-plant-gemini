@@ -25,10 +25,19 @@ EXTRACTION_SYSTEM_PROMPT = """
   * CARE_INQUIRY: پرسش درباره آبیاری، نور، دما یا شرایط محیطی
   * REPOTTING_INQUIRY: پرسش درباره زمان و روش تعویض گلدان و خاک
 - health_status: وضعیت سلامت گیاه بر اساس پیام (یکی از مقادیر: HEALTHY, SICK_OR_SYMPTOMATIC, UNKNOWN)
+- health_confirmed: تاییدیه صریح سلامت گیاه توسط کاربر:
+  * true: اگر کاربر صریحاً اعلام کند گیاه کاملاً سالم، در حال رشد و بدون آفت/زردی است (مانند «کاملاً سالمه»، «مشکلی نداره»)
+  * false: اگر گیاه دارای آفت، زردی، پوسیدگی یا بیماری باشد
+  * null: اگر کاربر صحبتی از سلامت نکرده باشد
+- trait_confirmed: تاییدیه وضعیت ابلق بودن یا سبز ساده بودن گیاه:
+  * true: اگر گیاه ابلق یا دارای لکه‌های سفید/کرم باشد (مانند «ابلق است»، «واریگیتد»)
+  * false: اگر گیاه سبز ساده یا معمولی و یکدست باشد (مانند «سبز ساده است»، «ابلق نیست»)
+  * null: اگر کاربر مشخص نکرده باشد
 - reported_symptoms: علائم ظاهری یا آفات ذکر شده توسط کاربر (مانند زردی برگ، لکه قهوه‌ای، کنه، شپشک، پوسیدگی، سوختگی نوک برگ)
 - missing_critical_info: متغیرهای حیاتی نامشخص
 
 در صورت عدم وجود هر یک از موارد، مقدار null یا لیست خالی بگذارید.
+
 """.strip()
 
 
@@ -234,17 +243,35 @@ class EntityExtractorService:
             "کاملا سالم", "کاملاً سالم", "سالم است", "سالمه", "مشکلی نداره",
             "مشکل نداره", "بدون آفت", "آفت نداره", "بیماری نداره",
             "هیچ علائمی نداره", "سرحاله", "سرحال است", "عالیه", "بدون مشکل",
-            "healthy", "no pests"
+            "healthy", "no pests", "کاملاً سالم و بدون آفت"
         ]
         is_health_confirmed = any(term in msg for term in health_positive_terms)
 
-        # 7. Intent and Health Status Resolution
+        # 7. Trait Confirmation Detection
+        trait_plain_terms = [
+            "سبز ساده", "سبز معمولی", "سبز یکدست", "سبز است", "سبزه",
+            "ابلق نیست", "ساده است", "معمولی است", "plain green", "green"
+        ]
+        is_plain_green = any(term in msg for term in trait_plain_terms)
+        is_variegated = any(alias in msg for alias in self.TRAITS_MAP.keys())
+
+        trait_confirmed: Optional[bool] = None
+        if is_variegated:
+            trait_confirmed = True
+            if "variegated_foliage" not in traits_q:
+                traits_q.append("variegated_foliage")
+        elif is_plain_green:
+            trait_confirmed = False
+
+        health_confirmed: Optional[bool] = None
         if symptoms:
             intent = "SYMPTOM_DIAGNOSIS"
             health_status = "SICK_OR_SYMPTOMATIC"
+            health_confirmed = False
             user_goal = "disease_treatment"
         elif is_health_confirmed:
             health_status = "HEALTHY"
+            health_confirmed = True
             if any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "جدول", "تغذیه"]):
                 intent = "FERTILIZER_REQUEST"
                 user_goal = "routine_care"
@@ -267,7 +294,6 @@ class EntityExtractorService:
             intent = "GENERAL_INTRO"
             user_goal = "general_consultation"
 
-
         # 8. Missing Critical Info
         missing: List[str] = []
         if not species_q:
@@ -283,9 +309,12 @@ class EntityExtractorService:
             user_goal=user_goal,
             intent=intent,
             health_status=health_status,
+            health_confirmed=health_confirmed,
+            trait_confirmed=trait_confirmed,
             reported_symptoms=symptoms,
             missing_critical_info=missing,
         )
+
 
 
     def resolve_species_id(self, query: Optional[str]) -> Optional[str]:

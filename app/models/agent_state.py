@@ -34,6 +34,14 @@ class ExtractedPlantEntities(BaseModel):
         default="UNKNOWN",
         description="Current perceived plant health: HEALTHY, SICK_OR_SYMPTOMATIC, or UNKNOWN.",
     )
+    health_confirmed: Optional[bool] = Field(
+        default=None,
+        description="Explicit confirmation of plant health status: True if confirmed healthy/growing, False if sick/pests/rot, None if unverified.",
+    )
+    trait_confirmed: Optional[bool] = Field(
+        default=None,
+        description="Explicit confirmation of key morphological trait: True if confirmed (e.g. variegated), False if negative (e.g. plain green), None if unverified.",
+    )
     reported_symptoms: List[str] = Field(
         default_factory=list,
         description="Any observed physiological symptoms or pests, e.g., ['زردی برگ', 'کنه', 'سیاه شدن ساقه', 'لکه قهوه‌ای'].",
@@ -59,6 +67,8 @@ class PlantCareState(TypedDict, total=False):
     extracted_entities: Optional[Dict[str, Any]]
     intent: Optional[Literal["GENERAL_INTRO", "SYMPTOM_DIAGNOSIS", "FERTILIZER_REQUEST", "CARE_INQUIRY", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY"]]
     health_status: Optional[Literal["HEALTHY", "SICK_OR_SYMPTOMATIC", "UNKNOWN"]]
+    health_confirmed: Optional[bool]
+    trait_confirmed: Optional[bool]
     reported_symptoms: List[str]
 
     # Resolved knowledge base IDs
@@ -83,4 +93,5 @@ class PlantCareState(TypedDict, total=False):
     # Final outputs
     calculated_schedule: Optional[Dict[str, Any]]
     final_response: Optional[str]
+
 

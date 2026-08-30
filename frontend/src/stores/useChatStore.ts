@@ -175,14 +175,18 @@ export const useChatStore = defineStore('chat', () => {
 
   function deriveQuickSlots(missingSlots: string[]) {
     const suggestions: string[] = [];
-    if (missingSlots.includes('substrate_type') || missingSlots.includes('substrate')) {
-      suggestions.push('خاک سبک و آروئید میکس');
-      suggestions.push('کوکوپیت و پرلیت');
-      suggestions.push('خاک باغچه‌ای و سنگین');
+    if (missingSlots.includes('trait_disambiguation') || missingSlots.includes('traits')) {
+      suggestions.push('🌿 سبز ساده و معمولی');
+      suggestions.push('🤍 ابلق (دارای بخش‌های سفید/کرم)');
     }
-    if (missingSlots.includes('traits')) {
-      suggestions.push('دارای برگ‌های ابلق');
-      suggestions.push('برگ‌های کاملاً سبز ساده');
+    if (missingSlots.includes('health_verification') || missingSlots.includes('health')) {
+      suggestions.push('✅ کاملاً سالم و بدون آفت');
+      suggestions.push('⚠️ دارای زردی برگ یا علائم آفت');
+    }
+    if (missingSlots.includes('substrate_type') || missingSlots.includes('substrate')) {
+      suggestions.push('کوکوپیت و پرلیت');
+      suggestions.push('خاک سبک و آروئید میکس');
+      suggestions.push('خاک باغچه‌ای و سنگین');
     }
     if (missingSlots.includes('current_phase')) {
       suggestions.push('فاز رشد رویشی فعال');

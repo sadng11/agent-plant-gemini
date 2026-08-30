@@ -268,10 +268,10 @@ async def test_chat_critical_blocker_clay_soil(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_chat_full_variegated_monstera_prescription(client: AsyncClient):
-    """Test POST /api/v1/chat returns 4-week calendar and advice for Variegated Monstera in Coco."""
+    """Test POST /api/v1/chat returns 4-week calendar and advice for Healthy Variegated Monstera in Coco."""
     payload = {
         "user_id": "user_chat_3",
-        "message": "برنامه کودی ۴ هفته‌ای برگ‌انجیری ابلق در بستر کوکوپیت و پرلیت",
+        "message": "برنامه کودی ۴ هفته‌ای برگ‌انجیری ابلق کاملا سالم در بستر کوکوپیت و پرلیت",
     }
     res = await client.post("/api/v1/chat", json=payload)
     assert res.status_code == 200
@@ -282,6 +282,7 @@ async def test_chat_full_variegated_monstera_prescription(client: AsyncClient):
     assert "10-10-30" in schedule["applied_npk_ratio"] or "12-12-36" in schedule["applied_npk_ratio"]
     assert len(schedule["weeks"]) == 4
     assert "هفته ۱" in data["response"]
+
 
 
 @pytest.mark.asyncio
@@ -397,7 +398,8 @@ async def test_chat_multi_turn_state_preservation(client: AsyncClient):
     data_1 = res_1.json()
     session_id = data_1["session_id"]
     assert "species" not in data_1["missing_slots"]
-    assert "بررسی سلامت" in data_1["response"]
+    assert "substrate" in data_1["missing_slots"]
+    assert "نوع خاک یا بستر کشت چیست" in data_1["response"]
 
     # Turn 2: "کوکوپیت و پرلیت، کاملا سالمه برنامه کودی می‌خوام" in same session
     req_2 = {
@@ -413,6 +415,7 @@ async def test_chat_multi_turn_state_preservation(client: AsyncClient):
     assert "برگ‌انجیری" in data_2["response"] or "مونسترا" in data_2["response"]
     assert "کوکوپیت" in data_2["response"]
     assert "هفته ۱" in data_2["response"]
+
 
 
 

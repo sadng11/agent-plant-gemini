@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 class PlantDiagnosticGraph:
     """
     Orchestrates the LangGraph multi-stage botanical diagnostic workflow.
-    Adheres to core plant-pathology principles:
-    1. Distinguishes user intent (Intro, Symptom Diagnosis, Care Inquiry, Fertilizer Request).
-    2. Enforces health & pathology verification before any fertilization recommendation.
-    3. Blocks chemical fertilizer for diseased, pest-infested, or root-damaged plants.
-    4. Computes 4-week precision schedules only for verified healthy plants in compatible substrates.
+    Adheres to clinical plant-pathology and validation gates:
+    Gate 1: Species & Substrate verification.
+    Gate 2: Trait Disambiguation (e.g. variegated foliage vs plain green for Monstera).
+    Gate 3: Health Confirmation Gate (ensuring no pests, root rot, or chlorosis before fertilizing).
+    Gate 4: Substrate Risk Triage (blocking dangerous substrates like heavy clay).
     """
 
     def __init__(
@@ -48,18 +48,18 @@ class PlantDiagnosticGraph:
         workflow.add_edge(START, "extract_and_resolve")
         workflow.add_edge("extract_and_resolve", "sync_digital_twin")
         workflow.add_edge("sync_digital_twin", "risk_triage")
+        workflow.add_edge("risk_triage", "goal_feasibility")
 
-        # Conditional Edge after Risk & Intent Triage
+        # Conditional Edge after Goal Feasibility
         workflow.add_conditional_edges(
-            "risk_triage",
-            self.route_after_triage,
+            "goal_feasibility",
+            self.route_after_feasibility,
             {
                 "blocked_or_clarification": "synthesize_response",
-                "proceed_feasibility": "goal_feasibility",
+                "proceed_schedule": "compute_schedule",
             },
         )
 
-        workflow.add_edge("goal_feasibility", "compute_schedule")
         workflow.add_edge("compute_schedule", "synthesize_response")
         workflow.add_edge("synthesize_response", END)
 
@@ -70,11 +70,12 @@ class PlantDiagnosticGraph:
     # =========================================================================
 
     @staticmethod
-    def route_after_triage(state: PlantCareState) -> str:
-        """Route to synthesis if blocked by substrate risk, pathology, general intro, or missing slots."""
+    def route_after_feasibility(state: PlantCareState) -> str:
+        """Route to synthesis if blocked by substrate risk, pathology, or pending gate slots."""
         risk_level = state.get("risk_level")
         intent = state.get("intent")
         health_status = state.get("health_status", "UNKNOWN")
+        health_confirmed = state.get("health_confirmed")
         missing_slots = state.get("missing_slots", [])
         species_id = state.get("resolved_species_id")
         substrate_id = state.get("resolved_substrate_id")
@@ -82,20 +83,22 @@ class PlantDiagnosticGraph:
         if not species_id or "species" in missing_slots:
             return "blocked_or_clarification"
 
-        if risk_level == "CRITICAL_BLOCKER":
-            return "blocked_or_clarification"
-
-        if health_status == "SICK_OR_SYMPTOMATIC" or intent == "SYMPTOM_DIAGNOSIS":
-            return "blocked_or_clarification"
-
-        if intent == "GENERAL_INTRO" and not state.get("plant_id"):
-            return "blocked_or_clarification"
-
         if not substrate_id or "substrate" in missing_slots:
             return "blocked_or_clarification"
 
-        return "proceed_feasibility"
+        if "trait_disambiguation" in missing_slots:
+            return "blocked_or_clarification"
 
+        if "health_verification" in missing_slots or health_confirmed is not True:
+            return "blocked_or_clarification"
+
+        if risk_level == "CRITICAL_BLOCKER":
+            return "blocked_or_clarification"
+
+        if health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or intent == "SYMPTOM_DIAGNOSIS":
+            return "blocked_or_clarification"
+
+        return "proceed_schedule"
 
     # =========================================================================
     # Node 1: Extract and Resolve Entities
@@ -103,6 +106,7 @@ class PlantDiagnosticGraph:
 
     async def node_extract_and_resolve(self, state: PlantCareState) -> Dict[str, Any]:
         user_message = state.get("user_message", "")
+        msg_lower = user_message.lower()
 
         # 1. Extract entities using Extractor Service for incoming message
         new_extracted_obj = await self.extractor.extract_entities_from_message(user_message)
@@ -117,16 +121,63 @@ class PlantDiagnosticGraph:
         species_id = new_species or state.get("resolved_species_id")
         substrate_id = new_substrate or state.get("resolved_substrate_id")
 
+        # Trait confirmation handling
+        plain_green_patterns = ["سبز ساده", "سبز معمولی", "سبز یکدست", "سبزه", "سبز است", "ابلق نیست", "ساده است", "معمولی است", "plain green"]
+        variegated_patterns = ["ابلق", "واریگیتد", "سفید سبز", "دورنگ", "دو رنگ", "variegated"]
+
+        prev_trait_confirmed = state.get("trait_confirmed")
+        if any(v in msg_lower for v in variegated_patterns):
+            trait_confirmed = True
+        elif any(p in msg_lower for p in plain_green_patterns):
+            trait_confirmed = False
+        elif new_extracted_obj.trait_confirmed is not None:
+            trait_confirmed = new_extracted_obj.trait_confirmed
+        else:
+            trait_confirmed = prev_trait_confirmed
+
         prev_traits = state.get("resolved_trait_ids") or []
-        trait_ids = list(dict.fromkeys(prev_traits + (new_traits or [])))
+        if trait_confirmed is False:
+            trait_ids = [t for t in prev_traits if t != "variegated_foliage"]
+        elif trait_confirmed is True or "variegated_foliage" in new_traits:
+            trait_ids = list(dict.fromkeys(prev_traits + ["variegated_foliage"]))
+            trait_confirmed = True
+        else:
+            trait_ids = prev_traits
 
         phase_id = new_phase or state.get("resolved_phase_id")
 
-        # Resolve intent and health status across turns
+        # Health confirmation handling
+        healthy_patterns = [
+            "کاملا سالم", "کاملاً سالم", "سالم است", "سالمه", "مشکلی نداره",
+            "مشکل نداره", "بدون آفت", "آفت نداره", "بیماری نداره",
+            "هیچ علائمی نداره", "سرحاله", "سرحال است", "عالیه", "بدون مشکل",
+            "healthy", "no pests"
+        ]
+
+        prev_health_confirmed = state.get("health_confirmed")
+        prev_symptoms = state.get("reported_symptoms") or []
+        reported_symptoms = list(dict.fromkeys(prev_symptoms + (new_extracted_obj.reported_symptoms or [])))
+
+        if new_extracted_obj.health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms:
+            health_confirmed = False
+            health_status = "SICK_OR_SYMPTOMATIC"
+        elif any(h in msg_lower for h in healthy_patterns):
+            health_confirmed = True
+            health_status = "HEALTHY"
+        elif new_extracted_obj.health_confirmed is not None:
+            health_confirmed = new_extracted_obj.health_confirmed
+            health_status = "HEALTHY" if health_confirmed else "SICK_OR_SYMPTOMATIC"
+        elif prev_health_confirmed is not None:
+            health_confirmed = prev_health_confirmed
+            health_status = state.get("health_status") or ("HEALTHY" if health_confirmed else "UNKNOWN")
+        else:
+            health_confirmed = None
+            health_status = state.get("health_status") or "UNKNOWN"
+
+        # Intent resolution
         new_intent = new_extracted_obj.intent
         prev_intent = state.get("intent")
-
-        if new_intent == "SYMPTOM_DIAGNOSIS":
+        if health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or new_intent == "SYMPTOM_DIAGNOSIS":
             intent = "SYMPTOM_DIAGNOSIS"
         elif new_intent in ["FERTILIZER_REQUEST", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY", "CARE_INQUIRY"]:
             intent = new_intent
@@ -134,25 +185,6 @@ class PlantDiagnosticGraph:
             intent = prev_intent
         else:
             intent = new_intent or prev_intent or "GENERAL_INTRO"
-
-        # Health status resolution
-        prev_health = state.get("health_status") or "UNKNOWN"
-        new_health = new_extracted_obj.health_status or "UNKNOWN"
-
-        if new_health == "SICK_OR_SYMPTOMATIC" or new_extracted_obj.reported_symptoms:
-            health_status = "SICK_OR_SYMPTOMATIC"
-        elif new_health == "HEALTHY":
-            health_status = "HEALTHY"
-        elif prev_health in ["HEALTHY", "SICK_OR_SYMPTOMATIC"]:
-            health_status = prev_health
-        else:
-            health_status = "UNKNOWN"
-
-        # Merge symptoms list
-        prev_symptoms = state.get("reported_symptoms") or []
-        reported_symptoms = list(dict.fromkeys(prev_symptoms + (new_extracted_obj.reported_symptoms or [])))
-        if reported_symptoms and health_status != "HEALTHY":
-            health_status = "SICK_OR_SYMPTOMATIC"
 
         # Merge raw extraction dictionaries for history
         prev_extracted = state.get("extracted_entities") or {}
@@ -164,17 +196,31 @@ class PlantDiagnosticGraph:
             "user_goal": new_extracted_obj.user_goal or prev_extracted.get("user_goal"),
             "intent": intent,
             "health_status": health_status,
+            "health_confirmed": health_confirmed,
+            "trait_confirmed": trait_confirmed,
             "reported_symptoms": reported_symptoms,
             "missing_critical_info": [],
         }
 
-        # 4. Identify missing critical slots
+        # 4. Multi-Stage Clinical Gate Slot Filling
         missing_slots: List[str] = []
+
         if not species_id:
             missing_slots.append("species")
-
-        if intent != "GENERAL_INTRO" and intent != "SYMPTOM_DIAGNOSIS" and not substrate_id:
-            missing_slots.append("substrate")
+        elif intent == "SYMPTOM_DIAGNOSIS" or health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False:
+            # Sick plant needs pathology triage, no further feeding slot needed
+            missing_slots = []
+        else:
+            # Plant feeding flow gates:
+            # Gate 1: Substrate
+            if not substrate_id:
+                missing_slots.append("substrate")
+            # Gate 2: Trait Disambiguation (For Monstera when trait is not yet confirmed)
+            elif species_id == "monstera_deliciosa" and trait_confirmed is None:
+                missing_slots.append("trait_disambiguation")
+            # Gate 3: Health Verification (Must confirm health before feeding schedule)
+            elif health_confirmed is not True:
+                missing_slots.append("health_verification")
 
         merged_extracted["missing_critical_info"] = missing_slots
 
@@ -208,15 +254,17 @@ class PlantDiagnosticGraph:
                 if "substrate" not in missing_slots:
                     missing_slots.append("substrate")
 
+        # Re-sync traits_data list based on trait_ids
         if trait_ids:
-            existing_trait_ids = {t.get("trait_id") for t in traits_data if isinstance(t, dict)}
+            traits_data = []
             for t_id in trait_ids:
-                if t_id not in existing_trait_ids:
-                    try:
-                        t_model = self.kb.get_trait(t_id)
-                        traits_data.append(t_model.model_dump())
-                    except Exception as exc:
-                        logger.warning(f"Could not load trait {t_id}: {exc}")
+                try:
+                    t_model = self.kb.get_trait(t_id)
+                    traits_data.append(t_model.model_dump())
+                except Exception as exc:
+                    logger.warning(f"Could not load trait {t_id}: {exc}")
+        elif trait_confirmed is False:
+            traits_data = []
 
         if phase_id and not phase_data:
             try:
@@ -229,6 +277,8 @@ class PlantDiagnosticGraph:
             "extracted_entities": merged_extracted,
             "intent": intent,
             "health_status": health_status,
+            "health_confirmed": health_confirmed,
+            "trait_confirmed": trait_confirmed,
             "reported_symptoms": reported_symptoms,
             "resolved_species_id": species_id,
             "resolved_substrate_id": substrate_id,
@@ -305,10 +355,15 @@ class PlantDiagnosticGraph:
                     except Exception as exc:
                         logger.warning(f"Could not load phase {phase_id}: {exc}")
 
-                # If digital twin plant is registered and no symptoms are reported, default health is healthy
                 health_status = state.get("health_status")
-                if not health_status or health_status == "UNKNOWN":
+                health_confirmed = state.get("health_confirmed")
+                if health_confirmed is None and (not health_status or health_status == "UNKNOWN"):
                     health_status = "HEALTHY"
+                    health_confirmed = True
+
+                trait_confirmed = state.get("trait_confirmed")
+                if trait_confirmed is None:
+                    trait_confirmed = bool(trait_ids)
 
                 return {
                     "nickname": plant.nickname,
@@ -317,6 +372,8 @@ class PlantDiagnosticGraph:
                     "resolved_trait_ids": trait_ids,
                     "resolved_phase_id": phase_id,
                     "health_status": health_status,
+                    "health_confirmed": health_confirmed,
+                    "trait_confirmed": trait_confirmed,
                     "species_data": species_data,
                     "substrate_data": substrate_data,
                     "traits_data": traits_data,
@@ -336,11 +393,12 @@ class PlantDiagnosticGraph:
         species_data = state.get("species_data")
         substrate_id = state.get("resolved_substrate_id")
         health_status = state.get("health_status", "UNKNOWN")
+        health_confirmed = state.get("health_confirmed")
         reported_symptoms = state.get("reported_symptoms") or []
         intent = state.get("intent")
 
         # 1. Pathology / Disease / Pest Triage
-        if health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
+        if health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
             symptom_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم بیماری یا آفت"
             return {
                 "risk_level": "CRITICAL_BLOCKER",
@@ -391,10 +449,11 @@ class PlantDiagnosticGraph:
         traits_data = state.get("traits_data", [])
         phase_data = state.get("phase_data")
         health_status = state.get("health_status", "UNKNOWN")
+        health_confirmed = state.get("health_confirmed")
         risk_level = state.get("risk_level")
 
         # Golden Rule: Never compute fertilizer schedule for sick plants or without substrate/species or blocker
-        if not species_data or not substrate_data or risk_level == "CRITICAL_BLOCKER" or health_status == "SICK_OR_SYMPTOMATIC":
+        if not species_data or not substrate_data or risk_level == "CRITICAL_BLOCKER" or health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is not True:
             return {"calculated_schedule": None}
 
         species_model = SpeciesModel(**species_data)
@@ -426,6 +485,8 @@ class PlantDiagnosticGraph:
         substrate_data = state.get("substrate_data")
         intent = state.get("intent")
         health_status = state.get("health_status", "UNKNOWN")
+        health_confirmed = state.get("health_confirmed")
+        trait_confirmed = state.get("trait_confirmed")
         reported_symptoms = state.get("reported_symptoms") or []
 
         species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
@@ -449,9 +510,28 @@ class PlantDiagnosticGraph:
             return {"final_response": response}
 
         # ---------------------------------------------------------------------
-        # Branch 2: Substrate is Critical Blocker (e.g. heavy clay on Monstera)
+        # Branch 2: Pathology Triage / Sick Plant with Symptoms (BLOCK FERTILIZER)
         # ---------------------------------------------------------------------
-        if risk_level == "CRITICAL_BLOCKER" and (not reported_symptoms and health_status != "SICK_OR_SYMPTOMATIC"):
+        if health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
+            symptoms_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم تنش زیستی"
+            response = (
+                f"🩺 **گزارش تریاژ و آسیب‌شناسی گیاه‌پزشکی برای {plant_desc}**\n\n"
+                f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
+                f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
+                f"به دلیل وجود علائم تنش/آفت و آسیب‌دیدگی بافت‌های گیاه، **مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای ریشه‌ها اکیداً ممنوع است.** "
+                f"(کوددهی به گیاه بیمار باعث سوختگی ریشه‌های مویین، تشدید مسمومیت اسمزی و تغذیه عوامل بیماری‌زا می‌شود).\n\n"
+                f"🛡️ **اقدامات درمانی و اصلاحی فوری:**\n"
+                f"۱. **بررسی دقیق و ایزولاسیون:** پشت و روی برگ‌ها و طوقه را بررسی کرده و در صورت وجود آفت گیاه را از سایر گلدان‌ها جدا کنید.\n"
+                f"۲. **تنظیم آبیاری و زهکش:** آبیاری را تا خشک شدن حداقل ۵۰ تا ۶۰ درصد عمق خاک متوقف کنید و از خروج آب مازاد از زهکش مطمئن شوید.\n"
+                f"۳. **درمان تخصصی:** در صورت مشاهده آفت (کنه/شپشک) از صابون حشره‌کش یا روغن چریش استفاده کرده و در صورت لکه‌های قارچی، برگ‌های آلوده را جدا نمایید.\n\n"
+                f"پس از مهار کامل علائم و آغاز رویش برگ‌های جدید و سالم، برنامه کودی برای گیاه صادر خواهد شد."
+            )
+            return {"final_response": response}
+
+        # ---------------------------------------------------------------------
+        # Branch 3: Substrate is Critical Blocker (e.g. heavy clay on Monstera)
+        # ---------------------------------------------------------------------
+        if risk_level == "CRITICAL_BLOCKER":
             ideal_mix = species_data.get("substrate_requirements", {}).get("ideal_mix", {}).get("label", "بستر سبک و متخلخل") if species_data else "بستر سبک"
             ideal_comp = species_data.get("substrate_requirements", {}).get("ideal_mix", {}).get("recommended_composition", "") if species_data else ""
 
@@ -470,55 +550,42 @@ class PlantDiagnosticGraph:
             return {"final_response": response}
 
         # ---------------------------------------------------------------------
-        # Branch 3: Pathology Triage / Sick Plant with Symptoms (BLOCK FERTILIZER)
-        # ---------------------------------------------------------------------
-        if health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
-            symptoms_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم تنش زیستی"
-            response = (
-                f"🩺 **گزارش تریاژ و آسیب‌شناسی گیاه‌پزشکی برای {plant_desc}**\n\n"
-                f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
-                f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
-                f"به دلیل وجود علائم تنش/آفت و آسیب‌دیدگی بافت‌های گیاه، **مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای ریشه‌ها اکیداً ممنوع است.** "
-                f"(کوددهی به گیاه بیمار باعث سوختگی ریشه‌های مویین، تشدید مسمومیت اسمزی و تغذیه عوامل بیماری‌زا می‌شود).\n\n"
-                f"🛡️ **اقدامات درمانی و اصلاحی فوری:**\n"
-                f"۱. **بررسی دقیق و ایزولاسیون:** پشت و روی برگ‌ها و طوقه را بررسی کرده و در صورت وجود آفت گیاه را از سایر گلدان‌ها جدا کنید.\n"
-                f"۲. **تنظیم آبیاری و زهکش:** آبیاری را تا خشک شدن حداقل ۵۰ تا ۶۰ درصد عمق خاک متوقف کنید و از خروج آب مازاد از زهکش مطمئن شوید.\n"
-                f"۳. **درمان تخصصی:** در صورت مشاهده آفت (کنه/شپشک) از صابون حشره‌کش یا روغن چریش استفاده کرده و در صورت لکه‌های قارچی، برگ‌های آلوده را جدا نمایید.\n\n"
-                f"پس از مهار کامل علائم و آغاز رویش برگ‌های جدید و سالم، برنامه کودی برای گیاه صادر خواهد شد."
-            )
-            return {"final_response": response}
-
-
-        # ---------------------------------------------------------------------
-        # Branch 4: General Intro (User just introduced plant, e.g., 'من یک گیاه مونسترا دارم')
-        # ---------------------------------------------------------------------
-        if intent == "GENERAL_INTRO":
-            response = (
-                f"سلام و درود! گیاه **{plant_desc}** شما شناسایی و ثبت شد. 🌱\n\n"
-                f"به عنوان دستیار تخصصی گیاه‌پزشک، در چه زمینه‌ای می‌توانم راهنمایی‌تان کنم؟\n\n"
-                f"۱. 🩺 **بررسی سلامت و آسیب‌شناسی:** آیا گیاه علائمی مثل زردی برگ، لکه‌های قهوه‌ای، آفت (کنه، شپشک، پشه) یا توقف رشد دارد؟\n"
-                f"۲. 🪴 **مشاوره بستر و شرایط محیطی:** نیاز به راهنمایی در مورد نور، برنامه آبیاری، یا خاک مناسب دارید؟\n"
-                f"۳. 🌿 **برنامه تغذیه و تقویت:** در صورتی که گیاه کاملاً سالم و بدون آفت باشد، مایل به دریافت جدول کوددهی هستید؟\n\n"
-                f"لطفاً وضعیت گیاه یا سوال موردنظرتان را بفرمایید."
-            )
-            return {"final_response": response}
-
-        # ---------------------------------------------------------------------
-        # Branch 5: Missing Substrate only
+        # Branch 4: Missing Substrate (Gate 1b)
         # ---------------------------------------------------------------------
         if "substrate" in missing_slots or not substrate_data:
             response = (
                 f"متشکرم. برای گیاه **{plant_desc}** شما، لطفاً بفرمایید نوع خاک یا بستر کشت چیست؟\n\n"
                 f"🌱 **گزینه‌های متداول:**\n"
                 f"- بستر کوکوپیت و پرلیت (بدون خاک / Soilless)\n"
-                f"- خاک سنگین، رسی یا باغچه‌ای\n"
                 f"- بستر متخلخل اروید میکس (پوسته درخت، پیت‌ماس و لکا)\n"
+                f"- خاک سنگین، رسی یا باغچه‌ای\n"
                 f"- سیستم هیدروپونیک یا سمی‌هیدرو (لکا/پون)"
             )
             return {"final_response": response}
 
         # ---------------------------------------------------------------------
-        # Branch 6: Healthy Plant + Compatible Substrate (4-Week Precision Schedule)
+        # Branch 5: Trait Disambiguation (Gate 2: Variegated vs Plain Green)
+        # ---------------------------------------------------------------------
+        if "trait_disambiguation" in missing_slots:
+            response = (
+                f"یک نکته مهم درباره **{species_name}**: آیا برگ‌های گیاه شما **سبز یکدست** است یا **ابلق (دارای بخش‌های سفید یا کرم‌رنگ)**؟\n\n"
+                f"*(نوع تغذیه و نیاز کودی گیاهان ابلق با نوع سبز متفاوت است.)*"
+            )
+            return {"final_response": response}
+
+        # ---------------------------------------------------------------------
+        # Branch 6: Health Check Gate (Gate 3: Must confirm health before schedule)
+        # ---------------------------------------------------------------------
+        if "health_verification" in missing_slots or (health_confirmed is not True):
+            response = (
+                f"قبل از تنظیم دوز و تقویم کودی برای **{plant_desc}**، لطفاً وضعیت سلامت ریشه و برگ‌ها را مشخص فرمایید:\n\n"
+                f"آیا گیاه شما در حال حاضر **کاملاً سالم، دارای رشد و بدون آفت یا زردی** است؟\n\n"
+                f"*(کوددهی به گیاه بیمار یا آفت‌زده باعث تشدید آسیب به ریشه می‌شود.)*"
+            )
+            return {"final_response": response}
+
+        # ---------------------------------------------------------------------
+        # Branch 7: Healthy Plant + Compatible Substrate (4-Week Precision Schedule)
         # ---------------------------------------------------------------------
         substrate_name = substrate_data.get("label", "") if substrate_data else ""
 

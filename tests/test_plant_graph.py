@@ -128,7 +128,7 @@ async def test_graph_end_to_end_variegated_monstera(kb_manager: KnowledgeBaseMan
     initial_state: PlantCareState = {
         "user_id": "user_success",
         "session_id": "sess_3",
-        "user_message": "برنامه کوددهی برای برگ‌انجیری ابلق که در بستر کوکوپیت و پرلیت هست رو می‌خواستم.",
+        "user_message": "برنامه کوددهی برای برگ‌انجیری ابلق کاملا سالم که در بستر کوکوپیت و پرلیت هست رو می‌خواستم.",
     }
 
     final_state = await graph.ainvoke(initial_state)
@@ -163,7 +163,7 @@ async def test_graph_indoor_flowering_goal(kb_manager: KnowledgeBaseManager):
     initial_state: PlantCareState = {
         "user_id": "user_flower",
         "session_id": "sess_4",
-        "user_message": "می‌خوام به برگ انجیری توی بستر اروید میکس کود بدم تا زودتر گل بده و میوه بیاره.",
+        "user_message": "می‌خوام به برگ انجیری ابلق و کاملا سالمم توی بستر اروید میکس کود بدم تا زودتر گل بده و میوه بیاره.",
     }
 
     final_state = await graph.ainvoke(initial_state)
@@ -172,6 +172,7 @@ async def test_graph_indoor_flowering_goal(kb_manager: KnowledgeBaseManager):
     response = final_state.get("final_response", "")
     assert "یادداشت اگرونومی" in response
     assert "سن بلوغ" in response
+
 
 
 # ============================================================================
@@ -260,11 +261,10 @@ async def test_extractor_with_mocked_openai():
 
 
 @pytest.mark.asyncio
-async def test_graph_intro_never_prematurely_schedules_fertilizer(kb_manager: KnowledgeBaseManager):
+async def test_graph_intro_gate1_asks_substrate(kb_manager: KnowledgeBaseManager):
     """
-    Core user issue test:
-    When user says 'من یک گیاه مونسترا دارم', agent must NOT jump to asking soil for feeding schedule.
-    It must acknowledge the plant, and ask what help is needed (health/disease, care/watering, or nutrition).
+    Gate 1 test:
+    When user introduces a plant ('من یک گیاه مونسترا دارم'), agent identifies the species and asks for substrate (Gate 1).
     """
     graph = create_plant_care_graph(kb_manager=kb_manager)
 
@@ -277,11 +277,12 @@ async def test_graph_intro_never_prematurely_schedules_fertilizer(kb_manager: Kn
     state_intro = await graph.ainvoke(intro_state)
 
     assert state_intro.get("resolved_species_id") == "monstera_deliciosa"
+    assert "substrate" in state_intro.get("missing_slots", [])
     assert state_intro.get("calculated_schedule") is None
     response = state_intro.get("final_response", "")
     assert "برگ‌انجیری" in response or "مونسترا" in response
-    assert "بررسی سلامت و آسیب‌شناسی" in response
-    assert "مشاوره بستر" in response or "آبیاری" in response
+    assert "نوع خاک یا بستر کشت چیست" in response
+
 
 
 @pytest.mark.asyncio
@@ -311,47 +312,112 @@ async def test_graph_pathology_triage_blocks_fertilizer(kb_manager: KnowledgeBas
 
 
 @pytest.mark.asyncio
-async def test_graph_multi_turn_intro_then_healthy_fertilizer(kb_manager: KnowledgeBaseManager):
+async def test_graph_4turn_clinical_gates_flow(kb_manager: KnowledgeBaseManager):
     """
-    Multi-turn conversation test:
-    - Step 1: User introduces plant ('مونسترا ابلق دارم') -> Welcome & asks what assistance needed.
-    - Step 2: User confirms healthy + soil + requests schedule ('کوکوپیت و پرلیت، کاملا سالمه، برنامه کودی می‌خوام') -> 4-week schedule produced.
+    4-Turn Clinical Validation Gate Test as specified by user:
+    1. Turn 1: «مونسترا دارم» -> Asks soil / substrate.
+    2. Turn 2: «کوکوپیت» -> Asks trait disambiguation (variegated vs plain green).
+    3. Turn 3: «ابلق است» -> Asks health confirmation.
+    4. Turn 4: «کاملاً سالمه» -> Issues 4-week schedule with 10-10-30 and silica & Cal-Mag supplements.
     """
     graph = create_plant_care_graph(kb_manager=kb_manager)
 
-    # Step 1: Send 'مونسترا ابلق دارم'
-    turn1_input: PlantCareState = {
-        "user_id": "user_multiturn",
-        "session_id": "sess_multiturn_1",
-        "user_message": "مونسترا ابلق دارم",
-    }
-    state_turn1 = await graph.ainvoke(turn1_input)
+    # Turn 1: «مونسترا دارم»
+    t1_state = await graph.ainvoke({
+        "user_id": "u_gate_test",
+        "session_id": "sess_gate_1",
+        "user_message": "مونسترا دارم",
+    })
+    assert t1_state.get("resolved_species_id") == "monstera_deliciosa"
+    assert "substrate" in t1_state.get("missing_slots", [])
+    assert t1_state.get("calculated_schedule") is None
+    assert "نوع خاک یا بستر کشت چیست" in t1_state.get("final_response", "")
 
-    assert state_turn1.get("resolved_species_id") == "monstera_deliciosa"
-    assert "variegated_foliage" in state_turn1.get("resolved_trait_ids", [])
-    assert state_turn1.get("calculated_schedule") is None
+    # Turn 2: «کوکوپیت»
+    t2_state = await graph.ainvoke({
+        **t1_state,
+        "user_message": "کوکوپیت",
+    })
+    assert t2_state.get("resolved_species_id") == "monstera_deliciosa"
+    assert t2_state.get("resolved_substrate_id") == "inert_soilless"
+    assert "trait_disambiguation" in t2_state.get("missing_slots", [])
+    assert t2_state.get("calculated_schedule") is None
+    assert "سبز یکدست" in t2_state.get("final_response", "")
+    assert "ابلق" in t2_state.get("final_response", "")
 
-    response1 = state_turn1.get("final_response", "")
-    assert "برگ‌انجیری" in response1 or "مونسترا" in response1
-    assert "بررسی سلامت" in response1
+    # Turn 3: «ابلق است»
+    t3_state = await graph.ainvoke({
+        **t2_state,
+        "user_message": "ابلق است",
+    })
+    assert t3_state.get("resolved_species_id") == "monstera_deliciosa"
+    assert t3_state.get("resolved_substrate_id") == "inert_soilless"
+    assert "variegated_foliage" in t3_state.get("resolved_trait_ids", [])
+    assert t3_state.get("trait_confirmed") is True
+    assert "health_verification" in t3_state.get("missing_slots", [])
+    assert t3_state.get("calculated_schedule") is None
+    assert "کاملاً سالم، دارای رشد و بدون آفت یا زردی" in t3_state.get("final_response", "")
 
-    # Step 2: User provides soil, health confirmation, and fertilizer request
-    turn2_input: PlantCareState = {
-        **state_turn1,
-        "user_message": "کوکوپیت و پرلیت، کاملا سالمه، برنامه کودی می‌خوام",
-    }
-    state_turn2 = await graph.ainvoke(turn2_input)
+    # Turn 4: «کاملاً سالمه»
+    t4_state = await graph.ainvoke({
+        **t3_state,
+        "user_message": "کاملاً سالمه",
+    })
+    assert t4_state.get("resolved_species_id") == "monstera_deliciosa"
+    assert t4_state.get("resolved_substrate_id") == "inert_soilless"
+    assert "variegated_foliage" in t4_state.get("resolved_trait_ids", [])
+    assert t4_state.get("health_confirmed") is True
+    assert t4_state.get("health_status") == "HEALTHY"
 
-    assert state_turn2.get("resolved_species_id") == "monstera_deliciosa"
-    assert "variegated_foliage" in state_turn2.get("resolved_trait_ids", [])
-    assert state_turn2.get("resolved_substrate_id") == "inert_soilless"
-
-    schedule = state_turn2.get("calculated_schedule")
+    schedule = t4_state.get("calculated_schedule")
     assert schedule is not None
     assert "10-10-30" in schedule["applied_npk_ratio"] or "12-12-36" in schedule["applied_npk_ratio"]
     assert len(schedule["weeks"]) == 4
 
-    response2 = state_turn2.get("final_response", "")
-    assert "برگ‌انجیری" in response2 or "مونسترا" in response2
-    assert "کوکوپیت" in response2
-    assert "هفته ۱" in response2
+    response4 = t4_state.get("final_response", "")
+    assert "نسخه تخصصی و تقویم تغذیه ۴ هفته‌ای" in response4
+    assert "برگ‌انجیری" in response4
+    assert "کوکوپیت" in response4
+
+
+@pytest.mark.asyncio
+async def test_graph_4turn_clinical_gates_plain_green_flow(kb_manager: KnowledgeBaseManager):
+    """
+    Test when user chooses plain green (not variegated):
+    Turn 1: «مونسترا» -> Asks soil.
+    Turn 2: «کوکوپیت» -> Asks trait.
+    Turn 3: «سبز ساده است» -> Asks health.
+    Turn 4: «کاملاً سالمه» -> Issues 4-week schedule with standard 3-1-2 / 20-20-20 NPK.
+    """
+    graph = create_plant_care_graph(kb_manager=kb_manager)
+
+    # Turn 1
+    t1 = await graph.ainvoke({
+        "user_id": "u_green",
+        "session_id": "sess_green",
+        "user_message": "مونسترا دارم",
+    })
+    # Turn 2
+    t2 = await graph.ainvoke({
+        **t1,
+        "user_message": "کوکوپیت و پرلیت",
+    })
+    # Turn 3: User specifies plain green
+    t3 = await graph.ainvoke({
+        **t2,
+        "user_message": "سبز ساده و معمولی است",
+    })
+    assert t3.get("trait_confirmed") is False
+    assert "variegated_foliage" not in t3.get("resolved_trait_ids", [])
+    assert "health_verification" in t3.get("missing_slots", [])
+
+    # Turn 4: User confirms health
+    t4 = await graph.ainvoke({
+        **t3,
+        "user_message": "کاملا سالمه و مشکلی نداره",
+    })
+    assert t4.get("health_confirmed") is True
+    schedule = t4.get("calculated_schedule")
+    assert schedule is not None
+    assert "3-1-2" in schedule["applied_npk_ratio"] or "20-20-20" in schedule["applied_npk_ratio"]
+
