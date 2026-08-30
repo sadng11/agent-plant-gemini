@@ -172,6 +172,10 @@ class KnowledgeBaseManager:
         substrates_model = self._ensure_substrates_loaded()
         return sorted(list(substrates_model.substrates.keys()))
 
+    def load_substrates(self) -> GlobalSubstratesModel:
+        """Load and return global substrates model."""
+        return self._ensure_substrates_loaded()
+
     # =========================================================================
     # Global Traits Operations
     # =========================================================================
@@ -214,6 +218,10 @@ class KnowledgeBaseManager:
         traits_model = self._ensure_traits_loaded()
         return sorted(list(traits_model.traits.keys()))
 
+    def load_traits(self) -> GlobalTraitsModel:
+        """Load and return global traits model."""
+        return self._ensure_traits_loaded()
+
     # =========================================================================
     # Global Phases Operations
     # =========================================================================
@@ -245,6 +253,10 @@ class KnowledgeBaseManager:
         """List all defined global phase IDs."""
         phases_model = self._ensure_phases_loaded()
         return sorted(list(phases_model.phases.keys()))
+
+    def load_phases(self) -> GlobalPhasesModel:
+        """Load and return global phases model."""
+        return self._ensure_phases_loaded()
 
     # =========================================================================
     # Bulk & Cache Control

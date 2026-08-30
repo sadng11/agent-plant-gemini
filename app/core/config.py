@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Optional
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "PhytoAgent"
     VERSION: str = "0.1.0"
     DEBUG: bool = False
+    API_V1_STR: str = "/api/v1"
+
+    # CORS settings for frontend clients
+    CORS_ORIGINS: List[str] = ["*"]
 
     # Database Settings (Default to PostgreSQL asyncpg, customizable for SQLite async)
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/plant_agent"

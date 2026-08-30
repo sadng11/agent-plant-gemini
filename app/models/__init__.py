@@ -1,6 +1,19 @@
 """Data models package."""
 
 from app.models.agent_state import ExtractedPlantEntities, PlantCareState
+from app.models.api_schemas import (
+    ChatRequest,
+    ChatResponse,
+    EventLogCreateRequest,
+    EventLogResponse,
+    PhaseSummaryResponse,
+    PlantCreateRequest,
+    PlantResponse,
+    PlantUpdateRequest,
+    SpeciesSummaryResponse,
+    SubstrateSummaryResponse,
+    TraitSummaryResponse,
+)
 from app.models.db_models import PlantEventLog, UserPlant
 from app.models.knowledge_base import (
     BaseFeedingModel,
@@ -29,6 +42,18 @@ from app.models.knowledge_base import (
 )
 
 __all__ = [
+    # API Schemas
+    "ChatRequest",
+    "ChatResponse",
+    "PlantCreateRequest",
+    "PlantUpdateRequest",
+    "PlantResponse",
+    "EventLogCreateRequest",
+    "EventLogResponse",
+    "SpeciesSummaryResponse",
+    "SubstrateSummaryResponse",
+    "TraitSummaryResponse",
+    "PhaseSummaryResponse",
     # Agent State Models
     "ExtractedPlantEntities",
     "PlantCareState",
