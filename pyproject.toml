@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-minversion = "8.0"
+minversion = "7.0"
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"

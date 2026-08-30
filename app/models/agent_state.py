@@ -86,6 +86,7 @@ class PlantCareState(TypedDict, total=False):
     # Control states
     missing_slots: List[str]
     risk_level: Literal["OPTIMAL", "SUB_OPTIMAL", "CRITICAL_BLOCKER"]
+    risk_type: Optional[Literal["PATHOLOGY", "SUBSTRATE"]]
     risk_message: Optional[str]
     feasibility_status: Optional[Literal["FEASIBLE", "UNREALISTIC"]]
     feasibility_message: Optional[str]

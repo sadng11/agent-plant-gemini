@@ -116,6 +116,8 @@ async def chat_diagnostic(
     agent_payload = {
         "plant_id": final_state.get("plant_id"),
         "risk_level": final_state.get("risk_level"),
+        "risk_type": final_state.get("risk_type"),
+        "risk_message": final_state.get("risk_message"),
         "feasibility_status": final_state.get("feasibility_status"),
         "calculated_schedule": final_state.get("calculated_schedule"),
         "missing_slots": final_state.get("missing_slots", []),
@@ -144,6 +146,8 @@ async def chat_diagnostic(
         response=agent_response_text,
         plant_id=final_state.get("plant_id"),
         risk_level=final_state.get("risk_level"),
+        risk_type=final_state.get("risk_type"),
+        risk_message=final_state.get("risk_message"),
         feasibility_status=final_state.get("feasibility_status"),
         calculated_schedule=final_state.get("calculated_schedule"),
         missing_slots=final_state.get("missing_slots", []),

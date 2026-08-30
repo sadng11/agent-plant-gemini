@@ -261,9 +261,29 @@ async def test_chat_critical_blocker_clay_soil(client: AsyncClient):
     assert res.status_code == 200
     data = res.json()
     assert data["risk_level"] == "CRITICAL_BLOCKER"
+    assert data["risk_type"] == "SUBSTRATE"
+    assert data["risk_message"] is not None
     assert data["calculated_schedule"] is None
     assert "هشدار بحرانی تریاژ بستر" in data["response"]
     assert "دستور توقف" in data["response"]
+
+
+@pytest.mark.asyncio
+async def test_chat_critical_blocker_pathology_symptoms(client: AsyncClient):
+    """Test POST /api/v1/chat blocks fertilizing and sets PATHOLOGY risk type for symptomatic plant."""
+    payload = {
+        "user_id": "user_chat_sick",
+        "message": "برگ‌های برگ‌انجیری من زرد شده و علائم آفت داره، چه کودی بدم؟",
+    }
+    res = await client.post("/api/v1/chat", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["risk_level"] == "CRITICAL_BLOCKER"
+    assert data["risk_type"] == "PATHOLOGY"
+    assert "تنش/بیماری" in data["risk_message"] or "علائم" in data["risk_message"]
+    assert data["calculated_schedule"] is None
+    assert "گزارش تریاژ و آسیب‌شناسی" in data["response"]
+    assert "توقف کامل کوددهی" in data["response"]
 
 
 @pytest.mark.asyncio

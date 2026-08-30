@@ -305,6 +305,8 @@ async def test_graph_pathology_triage_blocks_fertilizer(kb_manager: KnowledgeBas
     assert state_sick.get("resolved_species_id") == "monstera_deliciosa"
     assert state_sick.get("calculated_schedule") is None
     assert state_sick.get("risk_level") == "CRITICAL_BLOCKER"
+    assert state_sick.get("risk_type") == "PATHOLOGY"
+    assert state_sick.get("risk_message") is not None
     response = state_sick.get("final_response", "")
     assert "گزارش تریاژ و آسیب‌شناسی" in response
     assert "توقف کامل کوددهی" in response

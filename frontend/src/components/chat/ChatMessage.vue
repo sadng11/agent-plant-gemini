@@ -101,9 +101,11 @@ const parsedMarkdown = computed(() => {
         </div>
       </div>
 
-      <!-- CRITICAL BLOCKER Substrate Triage Banner -->
+      <!-- CRITICAL BLOCKER Risk Triage Banner (Pathology or Substrate) -->
       <RiskTriageBanner
         v-if="isAgent && message.risk_level === 'CRITICAL_BLOCKER'"
+        :risk-type="message.risk_type"
+        :custom-message="message.risk_message"
       />
 
       <!-- 4-Week Dynamic Nutrition Schedule Widget -->

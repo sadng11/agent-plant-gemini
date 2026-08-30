@@ -399,10 +399,11 @@ class PlantDiagnosticGraph:
 
         # 1. Pathology / Disease / Pest Triage
         if health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
-            symptom_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم بیماری یا آفت"
+            symptom_str = "، ".join(reported_symptoms) if reported_symptoms else "زردی برگ، علائم آفت یا تنش فیزیولوژیکی"
             return {
                 "risk_level": "CRITICAL_BLOCKER",
-                "risk_message": f"گیاه دارای علائم تنش/بیماری ({symptom_str}) است. کوددهی شیمیایی فوراً متوقف و اقدامات درمانی اعمال شود.",
+                "risk_type": "PATHOLOGY",
+                "risk_message": f"گیاه دارای علائم تنش/بیماری ({symptom_str}) است. به دلیل آسیب به بافت‌ها و ریشه‌های مویین، مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای گیاه متوقف می‌شود.",
             }
 
         # 2. Substrate Risk Triage
@@ -411,11 +412,13 @@ class PlantDiagnosticGraph:
             risk_level, risk_message = AgronomyEngine.evaluate_substrate_risk(species_model, substrate_id)
             return {
                 "risk_level": risk_level,
+                "risk_type": "SUBSTRATE" if risk_level == "CRITICAL_BLOCKER" else None,
                 "risk_message": risk_message,
             }
 
         return {
             "risk_level": "OPTIMAL",
+            "risk_type": None,
             "risk_message": None,
         }
 

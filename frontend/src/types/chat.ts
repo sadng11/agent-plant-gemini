@@ -1,4 +1,5 @@
 export type RiskLevel = 'OPTIMAL' | 'SUB_OPTIMAL' | 'CRITICAL_BLOCKER';
+export type RiskType = 'PATHOLOGY' | 'SUBSTRATE';
 export type FeasibilityStatus = 'FEASIBLE' | 'UNREALISTIC';
 
 export interface ScheduleWeek {
@@ -26,6 +27,8 @@ export interface ChatResponse {
   response: string;
   plant_id?: string | null;
   risk_level?: RiskLevel | null;
+  risk_type?: RiskType | string | null;
+  risk_message?: string | null;
   feasibility_status?: FeasibilityStatus | null;
   calculated_schedule?: CalculatedSchedule | null;
   missing_slots: string[];
@@ -39,6 +42,8 @@ export interface UIMessage {
   timestamp: Date;
   plant_id?: string | null;
   risk_level?: RiskLevel | null;
+  risk_type?: RiskType | string | null;
+  risk_message?: string | null;
   feasibility_status?: FeasibilityStatus | null;
   calculated_schedule?: CalculatedSchedule | null;
   missing_slots?: string[];
