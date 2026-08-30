@@ -1,5 +1,6 @@
 """Data models package."""
 
+from app.models.agent_state import ExtractedPlantEntities, PlantCareState
 from app.models.db_models import PlantEventLog, UserPlant
 from app.models.knowledge_base import (
     BaseFeedingModel,
@@ -28,6 +29,9 @@ from app.models.knowledge_base import (
 )
 
 __all__ = [
+    # Agent State Models
+    "ExtractedPlantEntities",
+    "PlantCareState",
     # DB Models
     "UserPlant",
     "PlantEventLog",
