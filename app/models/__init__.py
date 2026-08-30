@@ -1,5 +1,6 @@
 """Data models package."""
 
+from app.models.db_models import PlantEventLog, UserPlant
 from app.models.knowledge_base import (
     BaseFeedingModel,
     BotanicalInfoModel,
@@ -27,6 +28,10 @@ from app.models.knowledge_base import (
 )
 
 __all__ = [
+    # DB Models
+    "UserPlant",
+    "PlantEventLog",
+    # Knowledge Base Models
     "CompatibilityStatus",
     "SupplementModel",
     "LightToleranceModel",
