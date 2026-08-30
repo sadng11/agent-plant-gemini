@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { User, Sprout, AlertTriangle } from 'lucide-vue-next';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import type { UIMessage } from '../../types/chat';
 import RiskTriageBanner from './RiskTriageBanner.vue';
 import FourWeekScheduleCard from './FourWeekScheduleCard.vue';
@@ -25,9 +27,17 @@ const plantName = computed(() => {
   return plant ? plant.nickname : null;
 });
 
-// Format message text with paragraphs
-const formattedLines = computed(() => {
-  return props.message.text.split('\n');
+// Configure marked options
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+// Parse markdown securely with DOMPurify
+const parsedMarkdown = computed(() => {
+  if (!props.message.text) return '';
+  const rawHtml = marked.parse(props.message.text) as string;
+  return DOMPurify.sanitize(rawHtml);
 });
 </script>
 
@@ -72,12 +82,12 @@ const formattedLines = computed(() => {
         <span>{{ formattedTime }}</span>
       </div>
 
-      <!-- Main Message Text with RTL styling -->
-      <div class="text-sm leading-relaxed space-y-2 whitespace-pre-wrap font-normal" :class="isAgent ? 'text-slate-800' : 'text-emerald-50'">
-        <p v-for="(line, idx) in formattedLines" :key="idx" class="min-h-[1rem]">
-          {{ line }}
-        </p>
-      </div>
+      <!-- Main Message Text with Markdown rendering and RTL styling -->
+      <div
+        class="text-sm leading-relaxed font-normal markdown-body"
+        :class="isAgent ? 'markdown-agent text-slate-800' : 'markdown-user text-emerald-50'"
+        v-html="parsedMarkdown"
+      />
 
       <!-- Feasibility Warning Banner if UNREALISTIC -->
       <div
