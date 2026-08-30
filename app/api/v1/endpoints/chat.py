@@ -47,6 +47,9 @@ async def chat_diagnostic(
     prev_substrate_id: Optional[str] = None
     prev_trait_ids: List[str] = []
     prev_phase_id: Optional[str] = None
+    prev_health_status: str = "UNKNOWN"
+    prev_intent: Optional[str] = None
+    prev_reported_symptoms: List[str] = []
     prev_extracted: Dict[str, Any] = {}
 
     prior_messages = await chat_service.get_session_messages(session_obj.id)
@@ -60,6 +63,12 @@ async def chat_diagnostic(
                 prev_trait_ids = list(dict.fromkeys(prev_trait_ids + (m.payload["resolved_trait_ids"] or [])))
             if m.payload.get("resolved_phase_id"):
                 prev_phase_id = m.payload["resolved_phase_id"]
+            if m.payload.get("health_status"):
+                prev_health_status = m.payload["health_status"]
+            if m.payload.get("intent"):
+                prev_intent = m.payload["intent"]
+            if m.payload.get("reported_symptoms"):
+                prev_reported_symptoms = list(dict.fromkeys(prev_reported_symptoms + (m.payload["reported_symptoms"] or [])))
             if m.payload.get("extracted_entities"):
                 prev_extracted.update(m.payload["extracted_entities"])
 
@@ -87,6 +96,9 @@ async def chat_diagnostic(
         "resolved_substrate_id": prev_substrate_id,
         "resolved_trait_ids": prev_trait_ids,
         "resolved_phase_id": prev_phase_id,
+        "health_status": prev_health_status,
+        "intent": prev_intent,
+        "reported_symptoms": prev_reported_symptoms,
         "extracted_entities": prev_extracted if prev_extracted else None,
     }
 
@@ -104,6 +116,9 @@ async def chat_diagnostic(
         "resolved_substrate_id": final_state.get("resolved_substrate_id"),
         "resolved_trait_ids": final_state.get("resolved_trait_ids", []),
         "resolved_phase_id": final_state.get("resolved_phase_id"),
+        "health_status": final_state.get("health_status"),
+        "intent": final_state.get("intent"),
+        "reported_symptoms": final_state.get("reported_symptoms", []),
     }
 
     # 4. Persist agent response & telemetry payload

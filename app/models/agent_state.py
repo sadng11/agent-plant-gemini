@@ -26,9 +26,17 @@ class ExtractedPlantEntities(BaseModel):
         default=None,
         description="User's care goal or requested action, e.g., 'induce_flowering', 'routine_care', 'treatment'.",
     )
+    intent: Optional[Literal["GENERAL_INTRO", "SYMPTOM_DIAGNOSIS", "FERTILIZER_REQUEST", "CARE_INQUIRY", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY"]] = Field(
+        default=None,
+        description="High-level conversational intent: GENERAL_INTRO, SYMPTOM_DIAGNOSIS, FERTILIZER_REQUEST, CARE_INQUIRY, HEALTH_CONFIRMATION, REPOTTING_INQUIRY",
+    )
+    health_status: Optional[Literal["HEALTHY", "SICK_OR_SYMPTOMATIC", "UNKNOWN"]] = Field(
+        default="UNKNOWN",
+        description="Current perceived plant health: HEALTHY, SICK_OR_SYMPTOMATIC, or UNKNOWN.",
+    )
     reported_symptoms: List[str] = Field(
         default_factory=list,
-        description="Any observed physiological symptoms, e.g., ['زردی برگ', 'سیاه شدن ساقه'].",
+        description="Any observed physiological symptoms or pests, e.g., ['زردی برگ', 'کنه', 'سیاه شدن ساقه', 'لکه قهوه‌ای'].",
     )
     missing_critical_info: List[str] = Field(
         default_factory=list,
@@ -49,6 +57,9 @@ class PlantCareState(TypedDict, total=False):
 
     # Extracted entity objects
     extracted_entities: Optional[Dict[str, Any]]
+    intent: Optional[Literal["GENERAL_INTRO", "SYMPTOM_DIAGNOSIS", "FERTILIZER_REQUEST", "CARE_INQUIRY", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY"]]
+    health_status: Optional[Literal["HEALTHY", "SICK_OR_SYMPTOMATIC", "UNKNOWN"]]
+    reported_symptoms: List[str]
 
     # Resolved knowledge base IDs
     resolved_species_id: Optional[str]
@@ -72,3 +83,4 @@ class PlantCareState(TypedDict, total=False):
     # Final outputs
     calculated_schedule: Optional[Dict[str, Any]]
     final_response: Optional[str]
+

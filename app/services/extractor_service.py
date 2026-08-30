@@ -16,12 +16,21 @@ EXTRACTION_SYSTEM_PROMPT = """
 - substrate_query: نوع خاک یا بستر کشت (مانند کوکوپیت، پرلیت، خاک رسی، خاک باغچه، هیدروپونیک، بستر اروید)
 - traits_queries: صفات و ویژگی‌های خاص مورفولوژیکی (مانند ابلق، دورنگ، مینیاتوری، variegated)
 - phase_query: فاز زیستی یا فنولوژیکی جاری (مانند رشد رویشی، گل‌دهی، تشکیل میوه، خواب زمستانه)
-- user_goal: هدف یا خواسته اصلی کاربر (مانند routine_care برای تغذیه عادی، induce_flowering برای القای گلدهی/میوه‌دهی، repotting برای تعویض بستر یا درمان)
-- reported_symptoms: علائم ظاهری یا ناهنجاری‌های ذکر شده توسط کاربر (مانند زردی برگ، لکه قهوه‌ای، سوختگی نوک برگ)
-- missing_critical_info: متغیرهای حیاتی نامشخص (اگر نام گونه یا نوع بستر مشخص نیست، نام آن‌ها را در این لیست ذکر کنید)
+- user_goal: هدف یا خواسته کاربر (مانند routine_care, disease_treatment, induce_flowering, repotting, general_consultation)
+- intent: نیت اصلی گفت‌وگو (یکی از مقادیر: GENERAL_INTRO, SYMPTOM_DIAGNOSIS, FERTILIZER_REQUEST, CARE_INQUIRY, HEALTH_CONFIRMATION, REPOTTING_INQUIRY)
+  * GENERAL_INTRO: معرفی ساده گیاه بدون درخواست صریح کود یا علائم بیماری (مثل «من یک گیاه مونسترا دارم»)
+  * SYMPTOM_DIAGNOSIS: ذکر علائم بیماری، آفت، زردی، پژمردگی، لکه برگی و پوسیدگی
+  * FERTILIZER_REQUEST: درخواست برنامه کودی، دوز کود، تقویت‌کننده یا راهنمایی تغذیه
+  * HEALTH_CONFIRMATION: اعلام سالم و بی‌مشکل بودن گیاه در پاسخ به پرسش ایجنت (مثل «کاملاً سالمه»، «آفت نداره»)
+  * CARE_INQUIRY: پرسش درباره آبیاری، نور، دما یا شرایط محیطی
+  * REPOTTING_INQUIRY: پرسش درباره زمان و روش تعویض گلدان و خاک
+- health_status: وضعیت سلامت گیاه بر اساس پیام (یکی از مقادیر: HEALTHY, SICK_OR_SYMPTOMATIC, UNKNOWN)
+- reported_symptoms: علائم ظاهری یا آفات ذکر شده توسط کاربر (مانند زردی برگ، لکه قهوه‌ای، کنه، شپشک، پوسیدگی، سوختگی نوک برگ)
+- missing_critical_info: متغیرهای حیاتی نامشخص
 
 در صورت عدم وجود هر یک از موارد، مقدار null یا لیست خالی بگذارید.
 """.strip()
+
 
 
 class EntityExtractorService:
@@ -173,6 +182,8 @@ class EntityExtractorService:
         phase_q: Optional[str] = None
         user_goal: Optional[str] = None
         symptoms: List[str] = []
+        intent: Optional[str] = None
+        health_status: str = "UNKNOWN"
 
         # 1. Species Detection
         for alias in sorted(self.SPECIES_MAP.keys(), key=len, reverse=True):
@@ -197,23 +208,71 @@ class EntityExtractorService:
                 phase_q = self.PHASE_MAP[alias]
                 break
 
-        # 5. User Goal Detection
-        if any(term in msg for term in ["گل بده", "میوه بده", "میوه‌دهی", "شکوفه", "گلدهی", "flowering", "fruit"]):
+        # 5. Symptoms & Pathology Detection
+        symptom_keywords = {
+            "زرد": "زردی برگ (Chlorosis)",
+            "سیاه": "سیاه شدن ساقه/برگ (Necrosis)",
+            "سوخته": "سوختگی نوک یا حاشیه برگ",
+            "پژمرده": "پژمردگی و افتادگی ساقه",
+            "پوسیدگی": "پوسیدگی ریشه یا طوقه (Root Rot)",
+            "لکه": "لکه‌های برگی (قارچی/باکتریایی)",
+            "کنه": "کنه تارعنکبوتی (Spider Mites)",
+            "شپشک": "شپشک آردآلود (Mealybugs)",
+            "پشه": "پشه سیاه خاک (Fungus Gnats)",
+            "سفیدک": "سفیدک پودری (Powdery Mildew)",
+            "آفت": "مشاهده آفت و حشرات مضر",
+            "قارچ": "عفونت قارچی",
+            "ریزش": "ریزش غیرعادی برگ‌ها",
+            "شل": "شل شدن و له‌شدگی بافت",
+        }
+        for kw, sym_label in symptom_keywords.items():
+            if kw in msg:
+                symptoms.append(sym_label)
+
+        # 6. Health Confirmation Detection
+        health_positive_terms = [
+            "کاملا سالم", "کاملاً سالم", "سالم است", "سالمه", "مشکلی نداره",
+            "مشکل نداره", "بدون آفت", "آفت نداره", "بیماری نداره",
+            "هیچ علائمی نداره", "سرحاله", "سرحال است", "عالیه", "بدون مشکل",
+            "healthy", "no pests"
+        ]
+        is_health_confirmed = any(term in msg for term in health_positive_terms)
+
+        # 7. Intent and Health Status Resolution
+        if symptoms:
+            intent = "SYMPTOM_DIAGNOSIS"
+            health_status = "SICK_OR_SYMPTOMATIC"
+            user_goal = "disease_treatment"
+        elif is_health_confirmed:
+            health_status = "HEALTHY"
+            if any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "جدول", "تغذیه"]):
+                intent = "FERTILIZER_REQUEST"
+                user_goal = "routine_care"
+            else:
+                intent = "HEALTH_CONFIRMATION"
+                user_goal = "routine_care"
+        elif any(term in msg for term in ["گل بده", "میوه بده", "میوه‌دهی", "شکوفه", "گلدهی", "flowering", "fruit"]):
+            intent = "FERTILIZER_REQUEST"
             user_goal = "induce_flowering"
         elif any(term in msg for term in ["تعویض خاک", "تعویض گلدان", "repotting"]):
+            intent = "REPOTTING_INQUIRY"
             user_goal = "repotting"
-        elif any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "جدول"]):
+        elif any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه کودی", "برنامه کود", "برنامه", "چه کودی", "تغذیه", "feeding", "fertilizer", "جدول"]):
+            intent = "FERTILIZER_REQUEST"
             user_goal = "routine_care"
+        elif any(term in msg for term in ["آبیاری", "چقدر آب", "نور", "رطوبت", "دما", "نگهداری"]):
+            intent = "CARE_INQUIRY"
+            user_goal = "general_consultation"
+        else:
+            intent = "GENERAL_INTRO"
+            user_goal = "general_consultation"
 
-        # 6. Symptoms
-        if any(term in msg for term in ["زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه"]):
-            symptoms.append("distress_or_chlorosis")
 
-        # 7. Missing Critical Info
+        # 8. Missing Critical Info
         missing: List[str] = []
         if not species_q:
             missing.append("species")
-        if not substrate_q:
+        if intent == "FERTILIZER_REQUEST" and not substrate_q:
             missing.append("substrate")
 
         return ExtractedPlantEntities(
@@ -222,9 +281,12 @@ class EntityExtractorService:
             traits_queries=traits_q,
             phase_query=phase_q,
             user_goal=user_goal,
+            intent=intent,
+            health_status=health_status,
             reported_symptoms=symptoms,
             missing_critical_info=missing,
         )
+
 
     def resolve_species_id(self, query: Optional[str]) -> Optional[str]:
         """Resolves raw query to standard species_id."""

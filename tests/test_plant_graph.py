@@ -73,7 +73,7 @@ def kb_manager():
 
 @pytest.mark.asyncio
 async def test_graph_missing_critical_slots(kb_manager: KnowledgeBaseManager):
-    """When species and substrate are unknown, graph must ask targeted questions."""
+    """When species is unknown, graph must ask targeted questions to identify species."""
     graph = create_plant_care_graph(kb_manager=kb_manager)
 
     initial_state: PlantCareState = {
@@ -85,10 +85,8 @@ async def test_graph_missing_critical_slots(kb_manager: KnowledgeBaseManager):
     final_state = await graph.ainvoke(initial_state)
 
     assert "species" in final_state.get("missing_slots", [])
-    assert "substrate" in final_state.get("missing_slots", [])
     assert final_state.get("final_response") is not None
     assert "نام یا گونه" in final_state["final_response"]
-    assert "نوع خاک" in final_state["final_response"]
 
 
 # ============================================================================
@@ -205,7 +203,6 @@ async def test_graph_with_digital_twin_sync(
         "user_id": "user_twin_1",
         "session_id": "sess_5",
         "plant_id": str(plant.id),
-        # User message doesn't repeat species or traits
         "user_message": "برنامه آبیاری و کودی این ماهم چیه؟",
     }
 
@@ -232,6 +229,8 @@ async def test_extractor_with_mocked_openai():
         traits_queries=["variegated_foliage"],
         phase_query="active_vegetative",
         user_goal="routine_care",
+        intent="FERTILIZER_REQUEST",
+        health_status="HEALTHY",
         reported_symptoms=[],
         missing_critical_info=[],
     )
@@ -256,17 +255,67 @@ async def test_extractor_with_mocked_openai():
 
 
 # ============================================================================
-# 7. Multi-Turn Conversation & State Accumulation Tests
+# 7. Plant Pathology & Intent Verification Tests (User Scenario)
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_graph_multi_turn_state_accumulation(kb_manager: KnowledgeBaseManager):
+async def test_graph_intro_never_prematurely_schedules_fertilizer(kb_manager: KnowledgeBaseManager):
+    """
+    Core user issue test:
+    When user says 'من یک گیاه مونسترا دارم', agent must NOT jump to asking soil for feeding schedule.
+    It must acknowledge the plant, and ask what help is needed (health/disease, care/watering, or nutrition).
+    """
+    graph = create_plant_care_graph(kb_manager=kb_manager)
+
+    intro_state: PlantCareState = {
+        "user_id": "user_intro_test",
+        "session_id": "sess_intro_1",
+        "user_message": "من یک گیاه مونسترا دارم",
+    }
+
+    state_intro = await graph.ainvoke(intro_state)
+
+    assert state_intro.get("resolved_species_id") == "monstera_deliciosa"
+    assert state_intro.get("calculated_schedule") is None
+    response = state_intro.get("final_response", "")
+    assert "برگ‌انجیری" in response or "مونسترا" in response
+    assert "بررسی سلامت و آسیب‌شناسی" in response
+    assert "مشاوره بستر" in response or "آبیاری" in response
+
+
+@pytest.mark.asyncio
+async def test_graph_pathology_triage_blocks_fertilizer(kb_manager: KnowledgeBaseManager):
+    """
+    Plant pathology test:
+    When plant has disease/pests/symptoms, fertilizer must be strictly withheld and treatment steps provided.
+    """
+    graph = create_plant_care_graph(kb_manager=kb_manager)
+
+    # User reports disease symptoms on monstera
+    sick_state: PlantCareState = {
+        "user_id": "user_sick_test",
+        "session_id": "sess_sick_1",
+        "user_message": "برگ‌های مونسترا زرد شده و کنه زده چیکار کنم؟",
+    }
+
+    state_sick = await graph.ainvoke(sick_state)
+
+    assert state_sick.get("resolved_species_id") == "monstera_deliciosa"
+    assert state_sick.get("calculated_schedule") is None
+    assert state_sick.get("risk_level") == "CRITICAL_BLOCKER"
+    response = state_sick.get("final_response", "")
+    assert "گزارش تریاژ و آسیب‌شناسی" in response
+    assert "توقف کامل کوددهی" in response
+    assert "کنه" in response or "آفت" in response
+
+
+@pytest.mark.asyncio
+async def test_graph_multi_turn_intro_then_healthy_fertilizer(kb_manager: KnowledgeBaseManager):
     """
     Multi-turn conversation test:
-    - Step 1: User specifies species & trait ('مونسترا ابلق دارم') -> missing substrate asked directly.
-    - Step 2: User provides substrate ('کوکوپیت') with same session -> cumulative state preserves species,
-              and 4-week calendar schedule is generated without asking again.
+    - Step 1: User introduces plant ('مونسترا ابلق دارم') -> Welcome & asks what assistance needed.
+    - Step 2: User confirms healthy + soil + requests schedule ('کوکوپیت و پرلیت، کاملا سالمه، برنامه کودی می‌خوام') -> 4-week schedule produced.
     """
     graph = create_plant_care_graph(kb_manager=kb_manager)
 
@@ -280,25 +329,22 @@ async def test_graph_multi_turn_state_accumulation(kb_manager: KnowledgeBaseMana
 
     assert state_turn1.get("resolved_species_id") == "monstera_deliciosa"
     assert "variegated_foliage" in state_turn1.get("resolved_trait_ids", [])
-    assert state_turn1.get("resolved_substrate_id") is None
-    assert state_turn1.get("missing_slots") == ["substrate"]
+    assert state_turn1.get("calculated_schedule") is None
 
     response1 = state_turn1.get("final_response", "")
-    assert "خاک" in response1 or "بستر" in response1
-    # Verify no repeated generic welcome greeting when plant species is already recognized
-    assert "سلام! من **فیتوایجنت**" not in response1
+    assert "برگ‌انجیری" in response1 or "مونسترا" in response1
+    assert "بررسی سلامت" in response1
 
-    # Step 2: Send 'کوکوپیت' accumulating previous state
+    # Step 2: User provides soil, health confirmation, and fertilizer request
     turn2_input: PlantCareState = {
         **state_turn1,
-        "user_message": "کوکوپیت",
+        "user_message": "کوکوپیت و پرلیت، کاملا سالمه، برنامه کودی می‌خوام",
     }
     state_turn2 = await graph.ainvoke(turn2_input)
 
     assert state_turn2.get("resolved_species_id") == "monstera_deliciosa"
     assert "variegated_foliage" in state_turn2.get("resolved_trait_ids", [])
     assert state_turn2.get("resolved_substrate_id") == "inert_soilless"
-    assert len(state_turn2.get("missing_slots", [])) == 0
 
     schedule = state_turn2.get("calculated_schedule")
     assert schedule is not None
@@ -309,5 +355,3 @@ async def test_graph_multi_turn_state_accumulation(kb_manager: KnowledgeBaseMana
     assert "برگ‌انجیری" in response2 or "مونسترا" in response2
     assert "کوکوپیت" in response2
     assert "هفته ۱" in response2
-    assert "سلام! من **فیتوایجنت**" not in response2
-

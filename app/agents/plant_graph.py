@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 class PlantDiagnosticGraph:
     """
     Orchestrates the LangGraph multi-stage botanical diagnostic workflow.
+    Adheres to core plant-pathology principles:
+    1. Distinguishes user intent (Intro, Symptom Diagnosis, Care Inquiry, Fertilizer Request).
+    2. Enforces health & pathology verification before any fertilization recommendation.
+    3. Blocks chemical fertilizer for diseased, pest-infested, or root-damaged plants.
+    4. Computes 4-week precision schedules only for verified healthy plants in compatible substrates.
     """
 
     def __init__(
@@ -42,23 +47,14 @@ class PlantDiagnosticGraph:
         # Connect Edges
         workflow.add_edge(START, "extract_and_resolve")
         workflow.add_edge("extract_and_resolve", "sync_digital_twin")
+        workflow.add_edge("sync_digital_twin", "risk_triage")
 
-        # Conditional Edge 1: Are critical slots missing?
-        workflow.add_conditional_edges(
-            "sync_digital_twin",
-            self.route_after_extraction,
-            {
-                "ask_clarification": "synthesize_response",
-                "proceed_triage": "risk_triage",
-            },
-        )
-
-        # Conditional Edge 2: Is substrate a critical blocker?
+        # Conditional Edge after Risk & Intent Triage
         workflow.add_conditional_edges(
             "risk_triage",
             self.route_after_triage,
             {
-                "blocked": "synthesize_response",
+                "blocked_or_clarification": "synthesize_response",
                 "proceed_feasibility": "goal_feasibility",
             },
         )
@@ -74,18 +70,32 @@ class PlantDiagnosticGraph:
     # =========================================================================
 
     @staticmethod
-    def route_after_extraction(state: PlantCareState) -> str:
-        """Route to clarification if critical slots are missing; otherwise proceed."""
-        if state.get("missing_slots"):
-            return "ask_clarification"
-        return "proceed_triage"
-
-    @staticmethod
     def route_after_triage(state: PlantCareState) -> str:
-        """Route to warning response if substrate is dangerous/blocked; otherwise proceed."""
-        if state.get("risk_level") == "CRITICAL_BLOCKER":
-            return "blocked"
+        """Route to synthesis if blocked by substrate risk, pathology, general intro, or missing slots."""
+        risk_level = state.get("risk_level")
+        intent = state.get("intent")
+        health_status = state.get("health_status", "UNKNOWN")
+        missing_slots = state.get("missing_slots", [])
+        species_id = state.get("resolved_species_id")
+        substrate_id = state.get("resolved_substrate_id")
+
+        if not species_id or "species" in missing_slots:
+            return "blocked_or_clarification"
+
+        if risk_level == "CRITICAL_BLOCKER":
+            return "blocked_or_clarification"
+
+        if health_status == "SICK_OR_SYMPTOMATIC" or intent == "SYMPTOM_DIAGNOSIS":
+            return "blocked_or_clarification"
+
+        if intent == "GENERAL_INTRO" and not state.get("plant_id"):
+            return "blocked_or_clarification"
+
+        if not substrate_id or "substrate" in missing_slots:
+            return "blocked_or_clarification"
+
         return "proceed_feasibility"
+
 
     # =========================================================================
     # Node 1: Extract and Resolve Entities
@@ -103,7 +113,7 @@ class PlantDiagnosticGraph:
         new_traits = self.extractor.resolve_trait_ids(new_extracted_obj.traits_queries)
         new_phase = self.extractor.resolve_phase_id(new_extracted_obj.phase_query)
 
-        # 3. Incremental State Merge (preserve existing values if new message is empty)
+        # 3. Incremental State Merge
         species_id = new_species or state.get("resolved_species_id")
         substrate_id = new_substrate or state.get("resolved_substrate_id")
 
@@ -111,6 +121,38 @@ class PlantDiagnosticGraph:
         trait_ids = list(dict.fromkeys(prev_traits + (new_traits or [])))
 
         phase_id = new_phase or state.get("resolved_phase_id")
+
+        # Resolve intent and health status across turns
+        new_intent = new_extracted_obj.intent
+        prev_intent = state.get("intent")
+
+        if new_intent == "SYMPTOM_DIAGNOSIS":
+            intent = "SYMPTOM_DIAGNOSIS"
+        elif new_intent in ["FERTILIZER_REQUEST", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY", "CARE_INQUIRY"]:
+            intent = new_intent
+        elif prev_intent and prev_intent != "GENERAL_INTRO":
+            intent = prev_intent
+        else:
+            intent = new_intent or prev_intent or "GENERAL_INTRO"
+
+        # Health status resolution
+        prev_health = state.get("health_status") or "UNKNOWN"
+        new_health = new_extracted_obj.health_status or "UNKNOWN"
+
+        if new_health == "SICK_OR_SYMPTOMATIC" or new_extracted_obj.reported_symptoms:
+            health_status = "SICK_OR_SYMPTOMATIC"
+        elif new_health == "HEALTHY":
+            health_status = "HEALTHY"
+        elif prev_health in ["HEALTHY", "SICK_OR_SYMPTOMATIC"]:
+            health_status = prev_health
+        else:
+            health_status = "UNKNOWN"
+
+        # Merge symptoms list
+        prev_symptoms = state.get("reported_symptoms") or []
+        reported_symptoms = list(dict.fromkeys(prev_symptoms + (new_extracted_obj.reported_symptoms or [])))
+        if reported_symptoms and health_status != "HEALTHY":
+            health_status = "SICK_OR_SYMPTOMATIC"
 
         # Merge raw extraction dictionaries for history
         prev_extracted = state.get("extracted_entities") or {}
@@ -120,19 +162,23 @@ class PlantDiagnosticGraph:
             "traits_queries": list(dict.fromkeys((prev_extracted.get("traits_queries") or []) + (new_extracted_obj.traits_queries or []))),
             "phase_query": new_extracted_obj.phase_query or prev_extracted.get("phase_query"),
             "user_goal": new_extracted_obj.user_goal or prev_extracted.get("user_goal"),
-            "reported_symptoms": list(dict.fromkeys((prev_extracted.get("reported_symptoms") or []) + (new_extracted_obj.reported_symptoms or []))),
+            "intent": intent,
+            "health_status": health_status,
+            "reported_symptoms": reported_symptoms,
             "missing_critical_info": [],
         }
 
-        # 4. Identify missing critical slots across cumulative state
+        # 4. Identify missing critical slots
         missing_slots: List[str] = []
         if not species_id:
             missing_slots.append("species")
-        if not substrate_id:
+
+        if intent != "GENERAL_INTRO" and intent != "SYMPTOM_DIAGNOSIS" and not substrate_id:
             missing_slots.append("substrate")
+
         merged_extracted["missing_critical_info"] = missing_slots
 
-        # 5. Fetch Knowledge Base records if resolved (reuse existing or load new)
+        # 5. Fetch Knowledge Base records if resolved
         species_data: Optional[Dict[str, Any]] = (
             state.get("species_data") if (species_id == state.get("resolved_species_id") and state.get("species_data")) else None
         )
@@ -150,7 +196,8 @@ class PlantDiagnosticGraph:
                 species_data = sp_model.model_dump()
             except Exception as exc:
                 logger.warning(f"Could not load species {species_id}: {exc}")
-                missing_slots.append("species")
+                if "species" not in missing_slots:
+                    missing_slots.append("species")
 
         if substrate_id and not substrate_data:
             try:
@@ -158,7 +205,8 @@ class PlantDiagnosticGraph:
                 substrate_data = sub_model.model_dump()
             except Exception as exc:
                 logger.warning(f"Could not load substrate {substrate_id}: {exc}")
-                missing_slots.append("substrate")
+                if "substrate" not in missing_slots:
+                    missing_slots.append("substrate")
 
         if trait_ids:
             existing_trait_ids = {t.get("trait_id") for t in traits_data if isinstance(t, dict)}
@@ -179,6 +227,9 @@ class PlantDiagnosticGraph:
 
         return {
             "extracted_entities": merged_extracted,
+            "intent": intent,
+            "health_status": health_status,
+            "reported_symptoms": reported_symptoms,
             "resolved_species_id": species_id,
             "resolved_substrate_id": substrate_id,
             "resolved_trait_ids": trait_ids,
@@ -205,13 +256,11 @@ class PlantDiagnosticGraph:
             plant = await self.digital_twin_service.get_plant_by_id(plant_id, user_id=user_id)
             if plant:
                 updates: Dict[str, Any] = {}
-                # Merge missing parameters from digital twin
                 species_id = state.get("resolved_species_id") or plant.species_id
                 substrate_id = state.get("resolved_substrate_id") or plant.substrate_type
                 trait_ids = state.get("resolved_trait_ids") or (list(plant.traits) if plant.traits else [])
                 phase_id = state.get("resolved_phase_id") or plant.current_phase
 
-                # If state has new values, update digital twin
                 if state.get("resolved_substrate_id") and state["resolved_substrate_id"] != plant.substrate_type:
                     updates["substrate_type"] = state["resolved_substrate_id"]
                 if state.get("resolved_phase_id") and state["resolved_phase_id"] != plant.current_phase:
@@ -220,13 +269,12 @@ class PlantDiagnosticGraph:
                 if updates:
                     await self.digital_twin_service.update_plant_state(plant.id, updates)
 
-                missing_slots: List[str] = []
-                if not species_id:
+                missing_slots = list(state.get("missing_slots", []))
+                if not species_id and "species" not in missing_slots:
                     missing_slots.append("species")
-                if not substrate_id:
+                if not substrate_id and "substrate" not in missing_slots:
                     missing_slots.append("substrate")
 
-                # Load KB models if not loaded yet
                 species_data = state.get("species_data")
                 substrate_data = state.get("substrate_data")
                 traits_data = list(state.get("traits_data", []))
@@ -237,14 +285,12 @@ class PlantDiagnosticGraph:
                         species_data = self.kb.get_species(species_id).model_dump()
                     except Exception as exc:
                         logger.warning(f"Could not load species {species_id}: {exc}")
-                        missing_slots.append("species")
 
                 if substrate_id and not substrate_data:
                     try:
                         substrate_data = self.kb.get_substrate(substrate_id).model_dump()
                     except Exception as exc:
                         logger.warning(f"Could not load substrate {substrate_id}: {exc}")
-                        missing_slots.append("substrate")
 
                 if trait_ids and not traits_data:
                     for t_id in trait_ids:
@@ -259,44 +305,60 @@ class PlantDiagnosticGraph:
                     except Exception as exc:
                         logger.warning(f"Could not load phase {phase_id}: {exc}")
 
-                res: Dict[str, Any] = {
+                # If digital twin plant is registered and no symptoms are reported, default health is healthy
+                health_status = state.get("health_status")
+                if not health_status or health_status == "UNKNOWN":
+                    health_status = "HEALTHY"
+
+                return {
                     "nickname": plant.nickname,
                     "resolved_species_id": species_id,
                     "resolved_substrate_id": substrate_id,
                     "resolved_trait_ids": trait_ids,
                     "resolved_phase_id": phase_id,
+                    "health_status": health_status,
                     "species_data": species_data,
                     "substrate_data": substrate_data,
                     "traits_data": traits_data,
                     "phase_data": phase_data,
-                    "missing_slots": missing_slots,
+                    "missing_slots": [s for s in missing_slots if (s != "species" or not species_id) and (s != "substrate" or not substrate_id)],
                 }
-                return res
         except Exception as exc:
             logger.warning(f"Error syncing digital twin: {exc}")
 
         return {}
 
     # =========================================================================
-    # Node 3: Substrate Risk Triage
+    # Node 3: Risk & Pathology Triage
     # =========================================================================
 
     async def node_risk_triage(self, state: PlantCareState) -> Dict[str, Any]:
         species_data = state.get("species_data")
         substrate_id = state.get("resolved_substrate_id")
+        health_status = state.get("health_status", "UNKNOWN")
+        reported_symptoms = state.get("reported_symptoms") or []
+        intent = state.get("intent")
 
-        if not species_data or not substrate_id:
+        # 1. Pathology / Disease / Pest Triage
+        if health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
+            symptom_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم بیماری یا آفت"
             return {
                 "risk_level": "CRITICAL_BLOCKER",
-                "risk_message": "اطلاعات گونه یا بستر برای تریاژ ایمنی کافی نیست.",
+                "risk_message": f"گیاه دارای علائم تنش/بیماری ({symptom_str}) است. کوددهی شیمیایی فوراً متوقف و اقدامات درمانی اعمال شود.",
             }
 
-        species_model = SpeciesModel(**species_data)
-        risk_level, risk_message = AgronomyEngine.evaluate_substrate_risk(species_model, substrate_id)
+        # 2. Substrate Risk Triage
+        if species_data and substrate_id:
+            species_model = SpeciesModel(**species_data)
+            risk_level, risk_message = AgronomyEngine.evaluate_substrate_risk(species_model, substrate_id)
+            return {
+                "risk_level": risk_level,
+                "risk_message": risk_message,
+            }
 
         return {
-            "risk_level": risk_level,
-            "risk_message": risk_message,
+            "risk_level": "OPTIMAL",
+            "risk_message": None,
         }
 
     # =========================================================================
@@ -328,8 +390,11 @@ class PlantDiagnosticGraph:
         substrate_data = state.get("substrate_data")
         traits_data = state.get("traits_data", [])
         phase_data = state.get("phase_data")
+        health_status = state.get("health_status", "UNKNOWN")
+        risk_level = state.get("risk_level")
 
-        if not species_data or not substrate_data:
+        # Golden Rule: Never compute fertilizer schedule for sick plants or without substrate/species or blocker
+        if not species_data or not substrate_data or risk_level == "CRITICAL_BLOCKER" or health_status == "SICK_OR_SYMPTOMATIC":
             return {"calculated_schedule": None}
 
         species_model = SpeciesModel(**species_data)
@@ -359,55 +424,39 @@ class PlantDiagnosticGraph:
         schedule = state.get("calculated_schedule")
         species_data = state.get("species_data")
         substrate_data = state.get("substrate_data")
+        intent = state.get("intent")
+        health_status = state.get("health_status", "UNKNOWN")
+        reported_symptoms = state.get("reported_symptoms") or []
 
-        # Branch 1: Missing critical slots
-        if missing_slots:
-            # Case 1.1: Initial turn when neither species nor substrate is known
-            if "species" in missing_slots and "substrate" in missing_slots:
-                questions = [
-                    "۱. نام یا گونه گیاه شما چیست؟ (مثلاً برگ‌انجیری، درخت لیمو و...)",
-                    "۲. گیاه در چه نوع خاکی کاشته شده است؟ (مثلاً کوکوپیت و پرلیت، خاک سنگین و باغچه‌ای، بستر اروید یا هیدروپونیک)",
-                ]
-                response = (
-                    "سلام! من **فیتوایجنت**، متخصص گیاه‌پزشکی و اگرونومی شما هستم. 🌱\n\n"
-                    "برای اینکه بتوانم یک نسخه دقیق، علمی و بدون ریسک برای گیاه شما تجویز کنم، نیاز به تکمیل اطلاعات زیر دارم:\n\n"
-                    + "\n".join(questions)
-                    + "\n\nلطفاً این موارد را بفرمایید تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
-                )
-                return {"final_response": response}
+        species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
+        trait_labels = [t.get("label") for t in (state.get("traits_data") or []) if t.get("label")]
+        plant_desc = f"{species_name} {' '.join(trait_labels)}".strip() if trait_labels else species_name
 
-            # Case 1.2: Species is identified, asking specifically for substrate
-            if "substrate" in missing_slots:
-                species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
-                trait_labels = [t.get("label") for t in (state.get("traits_data") or []) if t.get("label")]
-                plant_desc = f"{species_name} {' '.join(trait_labels)}".strip() if trait_labels else species_name
-                response = (
-                    f"متشکرم. برای گیاه **{plant_desc}** شما، لطفاً بفرمایید نوع خاک یا بستر کشت چیست؟\n\n"
-                    f"🌱 **گزینه‌های متداول:**\n"
-                    f"- بستر کوکوپیت و پرلیت (بدون خاک / Soilless)\n"
-                    f"- خاک سنگین، رسی یا باغچه‌ای\n"
-                    f"- بستر متخلخل اروید میکس (پوسته درخت، پیت‌ماس و لکا)\n"
-                    f"- سیستم هیدروپونیک یا سمی‌هیدرو (لکا/پون)"
-                )
-                return {"final_response": response}
+        # ---------------------------------------------------------------------
+        # Branch 1: Species is completely unknown (Initial Welcome)
+        # ---------------------------------------------------------------------
+        if "species" in missing_slots or not species_data:
+            questions = [
+                "۱. نام یا گونه گیاه شما چیست؟ (مثلاً برگ‌انجیری، درخت لیمو و...)",
+                "۲. گیاه در چه نوع خاکی کاشته شده است؟ (مثلاً کوکوپیت و پرلیت، خاک سنگین و باغچه‌ای، بستر اروید یا هیدروپونیک)",
+            ]
+            response = (
+                "سلام! من **فیتوایجنت**، متخصص گیاه‌پزشکی و اگرونومی شما هستم. 🌱\n\n"
+                "برای اینکه بتوانم یک نسخه دقیق، علمی و بدون ریسک برای گیاه شما تجویز کنم، نیاز به تکمیل اطلاعات زیر دارم:\n\n"
+                + "\n".join(questions)
+                + "\n\nلطفاً این موارد را بفرمایید تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
+            )
+            return {"final_response": response}
 
-            # Case 1.3: Substrate is identified, asking specifically for species
-            if "species" in missing_slots:
-                substrate_name = substrate_data.get("label", "بستر انتخابی شما") if substrate_data else "بستر انتخابی شما"
-                response = (
-                    f"متشکرم. بستر کشت (**{substrate_name}**) ثبت شد.\n\n"
-                    f"لطفاً نام یا گونه گیاه خود را بفرمایید (مثلاً برگ‌انجیری، درخت لیمو، سانسوریا و...) تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
-                )
-                return {"final_response": response}
-
-        # Branch 2: Substrate is Critical Blocker
-        if risk_level == "CRITICAL_BLOCKER":
-            species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
+        # ---------------------------------------------------------------------
+        # Branch 2: Substrate is Critical Blocker (e.g. heavy clay on Monstera)
+        # ---------------------------------------------------------------------
+        if risk_level == "CRITICAL_BLOCKER" and (not reported_symptoms and health_status != "SICK_OR_SYMPTOMATIC"):
             ideal_mix = species_data.get("substrate_requirements", {}).get("ideal_mix", {}).get("label", "بستر سبک و متخلخل") if species_data else "بستر سبک"
             ideal_comp = species_data.get("substrate_requirements", {}).get("ideal_mix", {}).get("recommended_composition", "") if species_data else ""
 
             response = (
-                f"⛔ **هشدار بحرانی تریاژ بستر برای {species_name}**\n\n"
+                f"⛔ **هشدار بحرانی تریاژ بستر برای {plant_desc}**\n\n"
                 f"{risk_message}\n\n"
                 f"⚠️ **دستور توقف:** به دلیل ریسک بالای خفگی ریشه و پوسیدگی طوقه، **صدور هرگونه کود شیمیایی تا زمان اصلاح خاک متوقف می‌شود.**\n\n"
                 f"📋 **دستورالعمل تعویض بستر (Repotting):**\n"
@@ -420,12 +469,61 @@ class PlantDiagnosticGraph:
             )
             return {"final_response": response}
 
-        # Branch 3: Optimal / Sub-optimal prescription with 4-week schedule
-        species_name = species_data.get("botanical_info", {}).get("persian_name", "") if species_data else ""
+        # ---------------------------------------------------------------------
+        # Branch 3: Pathology Triage / Sick Plant with Symptoms (BLOCK FERTILIZER)
+        # ---------------------------------------------------------------------
+        if health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
+            symptoms_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم تنش زیستی"
+            response = (
+                f"🩺 **گزارش تریاژ و آسیب‌شناسی گیاه‌پزشکی برای {plant_desc}**\n\n"
+                f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
+                f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
+                f"به دلیل وجود علائم تنش/آفت و آسیب‌دیدگی بافت‌های گیاه، **مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای ریشه‌ها اکیداً ممنوع است.** "
+                f"(کوددهی به گیاه بیمار باعث سوختگی ریشه‌های مویین، تشدید مسمومیت اسمزی و تغذیه عوامل بیماری‌زا می‌شود).\n\n"
+                f"🛡️ **اقدامات درمانی و اصلاحی فوری:**\n"
+                f"۱. **بررسی دقیق و ایزولاسیون:** پشت و روی برگ‌ها و طوقه را بررسی کرده و در صورت وجود آفت گیاه را از سایر گلدان‌ها جدا کنید.\n"
+                f"۲. **تنظیم آبیاری و زهکش:** آبیاری را تا خشک شدن حداقل ۵۰ تا ۶۰ درصد عمق خاک متوقف کنید و از خروج آب مازاد از زهکش مطمئن شوید.\n"
+                f"۳. **درمان تخصصی:** در صورت مشاهده آفت (کنه/شپشک) از صابون حشره‌کش یا روغن چریش استفاده کرده و در صورت لکه‌های قارچی، برگ‌های آلوده را جدا نمایید.\n\n"
+                f"پس از مهار کامل علائم و آغاز رویش برگ‌های جدید و سالم، برنامه کودی برای گیاه صادر خواهد شد."
+            )
+            return {"final_response": response}
+
+
+        # ---------------------------------------------------------------------
+        # Branch 4: General Intro (User just introduced plant, e.g., 'من یک گیاه مونسترا دارم')
+        # ---------------------------------------------------------------------
+        if intent == "GENERAL_INTRO":
+            response = (
+                f"سلام و درود! گیاه **{plant_desc}** شما شناسایی و ثبت شد. 🌱\n\n"
+                f"به عنوان دستیار تخصصی گیاه‌پزشک، در چه زمینه‌ای می‌توانم راهنمایی‌تان کنم؟\n\n"
+                f"۱. 🩺 **بررسی سلامت و آسیب‌شناسی:** آیا گیاه علائمی مثل زردی برگ، لکه‌های قهوه‌ای، آفت (کنه، شپشک، پشه) یا توقف رشد دارد؟\n"
+                f"۲. 🪴 **مشاوره بستر و شرایط محیطی:** نیاز به راهنمایی در مورد نور، برنامه آبیاری، یا خاک مناسب دارید؟\n"
+                f"۳. 🌿 **برنامه تغذیه و تقویت:** در صورتی که گیاه کاملاً سالم و بدون آفت باشد، مایل به دریافت جدول کوددهی هستید؟\n\n"
+                f"لطفاً وضعیت گیاه یا سوال موردنظرتان را بفرمایید."
+            )
+            return {"final_response": response}
+
+        # ---------------------------------------------------------------------
+        # Branch 5: Missing Substrate only
+        # ---------------------------------------------------------------------
+        if "substrate" in missing_slots or not substrate_data:
+            response = (
+                f"متشکرم. برای گیاه **{plant_desc}** شما، لطفاً بفرمایید نوع خاک یا بستر کشت چیست؟\n\n"
+                f"🌱 **گزینه‌های متداول:**\n"
+                f"- بستر کوکوپیت و پرلیت (بدون خاک / Soilless)\n"
+                f"- خاک سنگین، رسی یا باغچه‌ای\n"
+                f"- بستر متخلخل اروید میکس (پوسته درخت، پیت‌ماس و لکا)\n"
+                f"- سیستم هیدروپونیک یا سمی‌هیدرو (لکا/پون)"
+            )
+            return {"final_response": response}
+
+        # ---------------------------------------------------------------------
+        # Branch 6: Healthy Plant + Compatible Substrate (4-Week Precision Schedule)
+        # ---------------------------------------------------------------------
         substrate_name = substrate_data.get("label", "") if substrate_data else ""
 
         lines = [
-            f"🌿 **نسخه تخصصی و تقویم تغذیه ۴ هفته‌ای برای {species_name}**",
+            f"🌿 **نسخه تخصصی و تقویم تغذیه ۴ هفته‌ای برای {plant_desc}**",
             f"- **بستر شناسایی‌شده:** {substrate_name}",
         ]
 

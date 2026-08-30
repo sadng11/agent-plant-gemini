@@ -115,27 +115,33 @@ const parsedMarkdown = computed(() => {
 
       <!-- Parsed Extracted Entities Badges -->
       <div
-        v-if="isAgent && message.extracted_entities && Object.keys(message.extracted_entities).length > 0"
-        class="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-[11px]"
+        v-if="isAgent && message.extracted_entities && (message.extracted_entities.species_query || message.extracted_entities.species_id || message.extracted_entities.substrate_query || message.extracted_entities.substrate_type || (message.extracted_entities.health_status && message.extracted_entities.health_status !== 'UNKNOWN'))"
+        class="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5 text-[11px]"
       >
-        <span class="text-slate-400 font-medium">پارامترهای شناسایی‌شده:</span>
+        <span class="text-slate-400 dark:text-slate-500 font-medium">پارامترهای شناسایی‌شده:</span>
         <span
-          v-if="message.extracted_entities.species_id"
-          class="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md"
+          v-if="message.extracted_entities.species_query || message.extracted_entities.species_id"
+          class="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-md font-medium"
         >
-          گونه: {{ message.extracted_entities.species_id }}
+          گونه: {{ message.extracted_entities.species_query || message.extracted_entities.species_id }}
         </span>
         <span
-          v-if="message.extracted_entities.substrate_type"
-          class="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md"
+          v-if="message.extracted_entities.substrate_query || message.extracted_entities.substrate_type"
+          class="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 rounded-md font-medium"
         >
-          بستر: {{ message.extracted_entities.substrate_type }}
+          بستر: {{ message.extracted_entities.substrate_query || message.extracted_entities.substrate_type }}
         </span>
         <span
-          v-if="message.extracted_entities.current_phase"
-          class="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md"
+          v-if="message.extracted_entities.health_status === 'HEALTHY'"
+          class="px-2 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 rounded-md font-medium"
         >
-          فاز: {{ message.extracted_entities.current_phase }}
+          وضعیت: سالم
+        </span>
+        <span
+          v-else-if="message.extracted_entities.health_status === 'SICK_OR_SYMPTOMATIC'"
+          class="px-2 py-0.5 bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 rounded-md font-medium"
+        >
+          وضعیت: دارای علائم بیماری / تنش
         </span>
       </div>
     </div>
