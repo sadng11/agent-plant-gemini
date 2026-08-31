@@ -42,6 +42,16 @@ watch(
 );
 
 watch(
+  () => {
+    const last = chatStore.messages[chatStore.messages.length - 1];
+    return last ? last.text : '';
+  },
+  () => {
+    scrollToBottom();
+  }
+);
+
+watch(
   () => chatStore.isLoading,
   (loading) => {
     if (loading) scrollToBottom();
@@ -155,11 +165,14 @@ function formatSessionDate(dateStr?: string | null) {
           <span>هنوز گفتگویی ثبت نشده است.</span>
         </div>
 
-        <button
+        <div
           v-for="sess in chatStore.sessions"
           :key="sess.id"
+          role="button"
+          tabindex="0"
           @click="handleSelectSession(sess.id)"
-          class="w-full text-right p-2.5 rounded-xl transition-all group flex items-start justify-between gap-2 relative"
+          @keydown.enter="handleSelectSession(sess.id)"
+          class="w-full text-right p-2.5 rounded-xl transition-all group flex items-start justify-between gap-2 relative cursor-pointer"
           :class="
             chatStore.sessionId === sess.id
               ? 'bg-emerald-50/80 border border-emerald-200/90 text-emerald-950 font-medium'
@@ -192,13 +205,14 @@ function formatSessionDate(dateStr?: string | null) {
 
           <!-- Delete Session Action -->
           <button
+            type="button"
             @click="(e) => handleDeleteSession(e, sess.id)"
             title="حذف گفتگو"
-            class="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all shrink-0"
+            class="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all shrink-0 cursor-pointer"
           >
             <Trash2 class="w-3.5 h-3.5" />
           </button>
-        </button>
+        </div>
       </div>
     </aside>
 

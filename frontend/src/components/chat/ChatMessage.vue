@@ -98,12 +98,28 @@ const parsedMarkdown = computed(() => {
         <span>{{ formattedTime }}</span>
       </div>
 
+      <!-- Streaming Thinking State (when waiting for first token) -->
+      <div v-if="isAgent && message.is_streaming && !message.text" class="flex items-center gap-2 py-1 text-slate-500 text-sm">
+        <span class="flex gap-1 items-center">
+          <span class="w-2 h-2 rounded-full bg-emerald-600 animate-bounce" style="animation-delay: 0ms"></span>
+          <span class="w-2 h-2 rounded-full bg-emerald-600 animate-bounce" style="animation-delay: 150ms"></span>
+          <span class="w-2 h-2 rounded-full bg-emerald-600 animate-bounce" style="animation-delay: 300ms"></span>
+        </span>
+        <span class="text-xs text-slate-400 font-medium">در حال بررسی و تنظیم نسخه گیاه‌پزشکی...</span>
+      </div>
+
       <!-- Main Message Text with Markdown rendering and RTL styling -->
       <div
-        class="text-sm leading-relaxed font-normal markdown-body"
+        v-else
+        class="text-sm leading-relaxed font-normal markdown-body inline"
         :class="isAgent ? 'markdown-agent text-slate-800' : 'markdown-user text-white'"
-        v-html="parsedMarkdown"
-      />
+      >
+        <span v-html="parsedMarkdown" />
+        <span
+          v-if="isAgent && message.is_streaming"
+          class="inline-block w-1.5 h-4 -mb-0.5 mr-1 bg-emerald-600 rounded-xs animate-pulse"
+        />
+      </div>
 
       <!-- User Message Retry Action Button -->
       <div

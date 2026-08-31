@@ -97,16 +97,17 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * Send user message to agent and persist turn
+   * Send user message to agent and stream response turn
    */
   async function sendMessage(text: string, plantIdOverride?: string) {
     if (!text.trim()) return;
 
     const targetPlantId = plantIdOverride !== undefined ? plantIdOverride : selectedPlantId.value;
 
-    // Optimistically add user message to UI
+    // 1. Optimistically add user message to UI
+    const userMsgId = 'user-' + Date.now();
     const userMsg: UIMessage = {
-      id: 'user-' + Date.now(),
+      id: userMsgId,
       sender: 'user',
       text: text.trim(),
       timestamp: new Date(),
@@ -116,61 +117,129 @@ export const useChatStore = defineStore('chat', () => {
     };
     messages.value.push(userMsg);
 
+    // 2. Add placeholder agent message with streaming state
+    const agentMsgId = 'agent-' + (Date.now() + 1);
+    const agentMsg: UIMessage = {
+      id: agentMsgId,
+      sender: 'agent',
+      text: '',
+      timestamp: new Date(),
+      plant_id: targetPlantId,
+      is_streaming: true,
+    };
+    messages.value.push(agentMsg);
+
+    const getUserMsg = () => messages.value.find((m) => m.id === userMsgId);
+    const getAgentMsg = () => messages.value.find((m) => m.id === agentMsgId);
+
     isLoading.value = true;
     error.value = null;
     activeQuickSlots.value = [];
 
     try {
-      const response = await chatApi.sendMessage({
-        user_id: plantStore.activeUserId,
-        message: text.trim(),
-        session_id: sessionId.value || undefined,
-        plant_id: targetPlantId || undefined,
-      });
+      await chatApi.streamMessage(
+        {
+          user_id: plantStore.activeUserId,
+          message: text.trim(),
+          session_id: sessionId.value || undefined,
+          plant_id: targetPlantId || undefined,
+        },
+        {
+          onStart(payload) {
+            const u = getUserMsg();
+            if (u) {
+              u.is_sending = false;
+              u.is_failed = false;
+            }
+            if (payload.session_id) {
+              sessionId.value = payload.session_id;
+              localStorage.setItem(ACTIVE_SESSION_KEY, payload.session_id);
+            }
+            const a = getAgentMsg();
+            if (a && payload.plant_id) {
+              a.plant_id = payload.plant_id;
+            }
+          },
+          onToken(token) {
+            const u = getUserMsg();
+            if (u) u.is_sending = false;
 
-      userMsg.is_sending = false;
-      userMsg.is_failed = false;
+            const a = getAgentMsg();
+            if (a) {
+              a.text += token;
+            }
+          },
+          onDone(response) {
+            const u = getUserMsg();
+            if (u) {
+              u.is_sending = false;
+              u.is_failed = false;
+            }
 
-      // Update session ID if created or returned
-      if (response.session_id) {
-        sessionId.value = response.session_id;
-        localStorage.setItem(ACTIVE_SESSION_KEY, response.session_id);
+            const a = getAgentMsg();
+            if (a) {
+              a.is_streaming = false;
+              if (response.response) {
+                a.text = response.response;
+              }
+              a.plant_id = response.plant_id || targetPlantId;
+              a.risk_level = response.risk_level;
+              a.risk_type = response.risk_type;
+              a.risk_message = response.risk_message;
+              a.feasibility_status = response.feasibility_status;
+              a.calculated_schedule = response.calculated_schedule;
+              a.missing_slots = response.missing_slots;
+              a.extracted_entities = response.extracted_entities;
+            }
+
+            if (response.missing_slots && response.missing_slots.length > 0) {
+              deriveQuickSlots(response.missing_slots);
+            } else {
+              activeQuickSlots.value = [];
+            }
+          },
+          onError(err) {
+            throw err;
+          },
+        }
+      );
+
+      const uFinal = getUserMsg();
+      if (uFinal) {
+        uFinal.is_sending = false;
+        uFinal.is_failed = false;
       }
-
-      // Add agent message to UI
-      const agentMsg: UIMessage = {
-        id: 'agent-' + Date.now(),
-        sender: 'agent',
-        text: response.response,
-        timestamp: new Date(),
-        plant_id: response.plant_id || targetPlantId,
-        risk_level: response.risk_level,
-        risk_type: response.risk_type,
-        risk_message: response.risk_message,
-        feasibility_status: response.feasibility_status,
-        calculated_schedule: response.calculated_schedule,
-        missing_slots: response.missing_slots,
-        extracted_entities: response.extracted_entities,
-      };
-      messages.value.push(agentMsg);
-
-      // Determine quick slot chips if any slots missing or suggestions
-      if (response.missing_slots && response.missing_slots.length > 0) {
-        deriveQuickSlots(response.missing_slots);
-      } else {
-        activeQuickSlots.value = [];
+      const aFinal = getAgentMsg();
+      if (aFinal) {
+        aFinal.is_streaming = false;
       }
 
       // Refresh sessions list in background
       await loadSessions();
 
       // If backend updated or linked a plant, refresh plants
-      if (response.plant_id) {
+      const curAgent = getAgentMsg();
+      if (curAgent && curAgent.plant_id) {
         await plantStore.fetchPlants();
       }
     } catch (err: any) {
-      userMsg.is_sending = false;
-      userMsg.is_failed = true;
+      const uErr = getUserMsg();
+      if (uErr) {
+        uErr.is_sending = false;
+        uErr.is_failed = true;
+      }
+      const aErr = getAgentMsg();
+      if (aErr) {
+        aErr.is_streaming = false;
+        // If nothing was streamed yet, clean up empty placeholder
+        if (!aErr.text.trim()) {
+          const agentIdx = messages.value.findIndex((m) => m.id === agentMsgId);
+          if (agentIdx !== -1) {
+            messages.value.splice(agentIdx, 1);
+          }
+        }
+      }
+
       error.value = err.message || 'خطا در برقراری ارتباط با دستیار گیاه‌پزشک';
       const errorMsg: UIMessage = {
         id: 'agent-err-' + Date.now(),
@@ -184,6 +253,10 @@ export const useChatStore = defineStore('chat', () => {
       messages.value.push(errorMsg);
     } finally {
       isLoading.value = false;
+      const aDone = getAgentMsg();
+      if (aDone) {
+        aDone.is_streaming = false;
+      }
     }
   }
 

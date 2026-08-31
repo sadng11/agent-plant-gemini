@@ -552,3 +552,34 @@ async def test_graph_4turn_clinical_gates_plain_green_flow(kb_manager: Knowledge
     assert schedule is not None
     assert "3-1-2" in schedule["applied_npk_ratio"] or "20-20-20" in schedule["applied_npk_ratio"]
 
+
+@pytest.mark.asyncio
+async def test_plant_diagnostic_streaming_generator(kb_manager: KnowledgeBaseManager):
+    """
+    Test PlantDiagnosticGraph.astream_diagnostic directly.
+    Verifies that tokens are yielded and a final 'done' state is produced.
+    """
+    agent = PlantDiagnosticGraph(kb_manager=kb_manager)
+
+    initial_state: PlantCareState = {
+        "user_id": "u_stream_graph",
+        "session_id": "sess_stream_graph",
+        "user_message": "سلام فیتو گیاهم بیحال شده",
+    }
+
+    events = []
+    tokens = []
+    async for event in agent.astream_diagnostic(initial_state):
+        events.append(event)
+        if event.get("type") == "token":
+            tokens.append(event.get("content", ""))
+
+    assert len(tokens) > 0
+    done_events = [e for e in events if e.get("type") == "done"]
+    assert len(done_events) == 1
+
+    final_state = done_events[0]["final_state"]
+    assert "species" in final_state.get("missing_slots", [])
+    assert len(final_state.get("final_response", "")) > 0
+
+

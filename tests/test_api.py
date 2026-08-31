@@ -435,5 +435,90 @@ async def test_chat_multi_turn_state_preservation(client: AsyncClient):
     assert "هفته ۱" in data_2["response"]
 
 
+# ============================================================================
+# 5. SSE Streaming Chat Endpoint Tests
+# ============================================================================
+
+
+def parse_sse_events(text: str) -> list:
+    events = []
+    current_event = "message"
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            current_event = "message"
+            continue
+        if line.startswith("event:"):
+            current_event = line[6:].strip()
+        elif line.startswith("data:"):
+            data_str = line[5:].strip()
+            if data_str:
+                import json
+                parsed = json.loads(data_str)
+                events.append({"event": current_event, "data": parsed})
+    return events
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_missing_slots(client: AsyncClient):
+    """Test POST /api/v1/chat/stream returns SSE stream with start, tokens, and done payload."""
+    payload = {
+        "user_id": "user_stream_1",
+        "message": "سلام گیاهم بیحال شده چی بهش بدم؟",
+    }
+    res = await client.post("/api/v1/chat/stream", json=payload)
+    assert res.status_code == 200
+    assert "text/event-stream" in res.headers.get("content-type", "")
+
+    events = parse_sse_events(res.text)
+    assert len(events) >= 3
+
+    event_types = [e["event"] for e in events]
+    assert "start" in event_types
+    assert "token" in event_types
+    assert "done" in event_types
+
+    done_event = next(e for e in events if e["event"] == "done")
+    done_data = done_event["data"]
+    assert "session_id" in done_data
+    assert "species" in done_data["missing_slots"]
+    assert len(done_data["response"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_persists_session_and_messages(client: AsyncClient):
+    """Test POST /api/v1/chat/stream persists conversation turn to PostgreSQL session history."""
+    user_id = "user_stream_persisted"
+    payload = {
+        "user_id": user_id,
+        "message": "برگ‌انجیری در خاک رس کاشتم",
+    }
+    res = await client.post("/api/v1/chat/stream", json=payload)
+    assert res.status_code == 200
+
+    events = parse_sse_events(res.text)
+    done_event = next(e for e in events if e["event"] == "done")
+    session_id = done_event["data"]["session_id"]
+    assert session_id
+
+    # Verify session is created in DB
+    sessions_res = await client.get("/api/v1/chat/sessions", params={"user_id": user_id})
+    assert sessions_res.status_code == 200
+    user_sessions = sessions_res.json()
+    assert len(user_sessions) == 1
+    assert user_sessions[0]["id"] == session_id
+
+    # Verify messages are saved
+    msgs_res = await client.get(f"/api/v1/chat/sessions/{session_id}/messages", params={"user_id": user_id})
+    assert msgs_res.status_code == 200
+    msgs = msgs_res.json()
+    assert len(msgs) == 2
+    assert msgs[0]["sender"] == "user"
+    assert msgs[0]["content"] == "برگ‌انجیری در خاک رس کاشتم"
+    assert msgs[1]["sender"] == "agent"
+    assert msgs[1]["payload"]["risk_level"] == "CRITICAL_BLOCKER"
+
+
+
 
 

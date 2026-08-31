@@ -35,6 +35,18 @@ export interface ChatResponse {
   extracted_entities?: Record<string, any> | null;
 }
 
+export interface StreamStartPayload {
+  session_id: string;
+  plant_id?: string | null;
+}
+
+export interface StreamCallbacks {
+  onStart?: (data: StreamStartPayload) => void;
+  onToken?: (token: string) => void;
+  onDone?: (data: ChatResponse) => void;
+  onError?: (err: Error) => void;
+}
+
 export interface UIMessage {
   id: string;
   sender: 'user' | 'agent';
@@ -51,6 +63,7 @@ export interface UIMessage {
   is_error?: boolean;
   is_failed?: boolean;
   is_sending?: boolean;
+  is_streaming?: boolean;
   failed_text?: string;
 }
 
