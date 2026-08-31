@@ -339,79 +339,136 @@ class PlantDiagnosticGraph:
         plant_id = state.get("plant_id")
         user_id = state.get("user_id")
 
-        if not self.digital_twin_service or not plant_id:
+        if not self.digital_twin_service:
             return {}
 
         try:
-            plant = await self.digital_twin_service.get_plant_by_id(plant_id, user_id=user_id)
-            if plant:
-                updates: Dict[str, Any] = {}
-                species_id = state.get("resolved_species_id") or plant.species_id
-                substrate_id = state.get("resolved_substrate_id") or plant.substrate_type
-                trait_ids = state.get("resolved_trait_ids") or (list(plant.traits) if plant.traits else [])
-                phase_id = state.get("resolved_phase_id") or plant.current_phase
+            species_id = state.get("resolved_species_id")
+            substrate_id = state.get("resolved_substrate_id")
+            trait_ids = state.get("resolved_trait_ids") or []
+            phase_id = state.get("resolved_phase_id")
+            health_status = state.get("health_status")
+            health_confirmed = state.get("health_confirmed")
+            trait_confirmed = state.get("trait_confirmed")
 
-                if state.get("resolved_substrate_id") and state["resolved_substrate_id"] != plant.substrate_type:
-                    updates["substrate_type"] = state["resolved_substrate_id"]
-                if state.get("resolved_phase_id") and state["resolved_phase_id"] != plant.current_phase:
-                    updates["current_phase"] = state["resolved_phase_id"]
+            species_data = state.get("species_data")
+            substrate_data = state.get("substrate_data")
+            traits_data = list(state.get("traits_data", []))
+            phase_data = state.get("phase_data")
 
-                if updates:
-                    await self.digital_twin_service.update_plant_state(plant.id, updates)
+            # Load KB data if needed
+            if species_id and not species_data:
+                try:
+                    species_data = self.kb.get_species(species_id).model_dump()
+                except Exception as exc:
+                    logger.warning(f"Could not load species {species_id}: {exc}")
+
+            if substrate_id and not substrate_data:
+                try:
+                    substrate_data = self.kb.get_substrate(substrate_id).model_dump()
+                except Exception as exc:
+                    logger.warning(f"Could not load substrate {substrate_id}: {exc}")
+
+            if trait_ids and not traits_data:
+                for t_id in trait_ids:
+                    try:
+                        traits_data.append(self.kb.get_trait(t_id).model_dump())
+                    except Exception as exc:
+                        logger.warning(f"Could not load trait {t_id}: {exc}")
+
+            if phase_id and not phase_data:
+                try:
+                    phase_data = self.kb.get_phase(phase_id).model_dump()
+                except Exception as exc:
+                    logger.warning(f"Could not load phase {phase_id}: {exc}")
+
+            if health_confirmed is None and (not health_status or health_status == "UNKNOWN"):
+                health_status = "HEALTHY"
+                health_confirmed = True
+
+            if trait_confirmed is None:
+                trait_confirmed = bool(trait_ids)
+
+            # Case 1: Existing plant in DB -> sync updates
+            if plant_id:
+                plant = await self.digital_twin_service.get_plant_by_id(plant_id, user_id=user_id)
+                if plant:
+                    updates: Dict[str, Any] = {}
+                    species_id = species_id or plant.species_id
+                    substrate_id = substrate_id or plant.substrate_type
+                    trait_ids = trait_ids or (list(plant.traits) if plant.traits else [])
+                    phase_id = phase_id or plant.current_phase
+
+                    if state.get("resolved_substrate_id") and state["resolved_substrate_id"] != plant.substrate_type:
+                        updates["substrate_type"] = state["resolved_substrate_id"]
+                    if state.get("resolved_phase_id") and state["resolved_phase_id"] != plant.current_phase:
+                        updates["current_phase"] = state["resolved_phase_id"]
+                    if trait_ids and trait_ids != (list(plant.traits) if plant.traits else []):
+                        updates["traits"] = trait_ids
+                    if health_status and health_status != plant.health_status and health_status != "UNKNOWN":
+                        updates["health_status"] = health_status
+
+                    if updates:
+                        await self.digital_twin_service.update_plant_state(plant.id, updates)
+
+                    missing_slots = list(state.get("missing_slots", []))
+                    if not species_id and "species" not in missing_slots:
+                        missing_slots.append("species")
+                    if not substrate_id and "substrate" not in missing_slots:
+                        missing_slots.append("substrate")
+
+                    return {
+                        "plant_id": str(plant.id),
+                        "nickname": plant.nickname,
+                        "resolved_species_id": species_id,
+                        "resolved_substrate_id": substrate_id,
+                        "resolved_trait_ids": trait_ids,
+                        "resolved_phase_id": phase_id,
+                        "health_status": health_status,
+                        "health_confirmed": health_confirmed,
+                        "trait_confirmed": trait_confirmed,
+                        "species_data": species_data,
+                        "substrate_data": substrate_data,
+                        "traits_data": traits_data,
+                        "phase_data": phase_data,
+                        "missing_slots": [s for s in missing_slots if (s != "species" or not species_id) and (s != "substrate" or not substrate_id)],
+                    }
+
+            # Case 2: No plant_id yet, but species and substrate are resolved and user_id is provided
+            # Auto-register plant in Digital Garden
+            elif species_id and substrate_id and user_id:
+                persian_name = species_data.get("botanical_info", {}).get("persian_name") if species_data else None
+                nickname = persian_name or species_id
+
+                new_plant = await self.digital_twin_service.create_plant(
+                    user_id=user_id,
+                    nickname=nickname,
+                    species_id=species_id,
+                    substrate_type=substrate_id,
+                    traits=trait_ids,
+                    current_phase=phase_id or "active_vegetative",
+                    health_status=health_status if (health_status and health_status != "UNKNOWN") else "HEALTHY",
+                )
+
+                # Log initial registration event
+                await self.digital_twin_service.log_event(
+                    plant_id=new_plant.id,
+                    event_type="DISCOVERY",
+                    details={
+                        "source": "diagnostic_chat",
+                        "registered_via": "PhytoAgent Consultation",
+                    },
+                )
 
                 missing_slots = list(state.get("missing_slots", []))
-                if not species_id and "species" not in missing_slots:
-                    missing_slots.append("species")
-                if not substrate_id and "substrate" not in missing_slots:
-                    missing_slots.append("substrate")
-
-                species_data = state.get("species_data")
-                substrate_data = state.get("substrate_data")
-                traits_data = list(state.get("traits_data", []))
-                phase_data = state.get("phase_data")
-
-                if species_id and not species_data:
-                    try:
-                        species_data = self.kb.get_species(species_id).model_dump()
-                    except Exception as exc:
-                        logger.warning(f"Could not load species {species_id}: {exc}")
-
-                if substrate_id and not substrate_data:
-                    try:
-                        substrate_data = self.kb.get_substrate(substrate_id).model_dump()
-                    except Exception as exc:
-                        logger.warning(f"Could not load substrate {substrate_id}: {exc}")
-
-                if trait_ids and not traits_data:
-                    for t_id in trait_ids:
-                        try:
-                            traits_data.append(self.kb.get_trait(t_id).model_dump())
-                        except Exception as exc:
-                            logger.warning(f"Could not load trait {t_id}: {exc}")
-
-                if phase_id and not phase_data:
-                    try:
-                        phase_data = self.kb.get_phase(phase_id).model_dump()
-                    except Exception as exc:
-                        logger.warning(f"Could not load phase {phase_id}: {exc}")
-
-                health_status = state.get("health_status")
-                health_confirmed = state.get("health_confirmed")
-                if health_confirmed is None and (not health_status or health_status == "UNKNOWN"):
-                    health_status = "HEALTHY"
-                    health_confirmed = True
-
-                trait_confirmed = state.get("trait_confirmed")
-                if trait_confirmed is None:
-                    trait_confirmed = bool(trait_ids)
-
                 return {
-                    "nickname": plant.nickname,
+                    "plant_id": str(new_plant.id),
+                    "nickname": new_plant.nickname,
                     "resolved_species_id": species_id,
                     "resolved_substrate_id": substrate_id,
                     "resolved_trait_ids": trait_ids,
-                    "resolved_phase_id": phase_id,
-                    "health_status": health_status,
+                    "resolved_phase_id": phase_id or "active_vegetative",
+                    "health_status": new_plant.health_status,
                     "health_confirmed": health_confirmed,
                     "trait_confirmed": trait_confirmed,
                     "species_data": species_data,

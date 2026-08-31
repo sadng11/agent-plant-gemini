@@ -213,6 +213,42 @@ async def test_graph_with_digital_twin_sync(
     assert final_state.get("calculated_schedule") is not None
 
 
+@pytest.mark.asyncio
+async def test_graph_auto_creates_digital_twin_when_species_and_substrate_resolved(
+    kb_manager: KnowledgeBaseManager,
+    db_session: AsyncSession,
+):
+    """When a new plant (species + substrate) is introduced in chat without pre-existing plant_id, it must be auto-registered in DB."""
+    dt_service = DigitalTwinService(session=db_session)
+    graph = create_plant_care_graph(
+        kb_manager=kb_manager,
+        digital_twin_service=dt_service,
+    )
+
+    initial_state: PlantCareState = {
+        "user_id": "user_auto_register",
+        "session_id": "sess_auto_1",
+        "user_message": "مونسترا در کوکوپیت و پرلیت دارم",
+    }
+
+    final_state = await graph.ainvoke(initial_state)
+
+    created_plant_id = final_state.get("plant_id")
+    assert created_plant_id is not None
+
+    # Verify plant exists in database
+    plant_in_db = await dt_service.get_plant_by_id(created_plant_id, user_id="user_auto_register")
+    assert plant_in_db is not None
+    assert plant_in_db.species_id == "monstera_deliciosa"
+    assert plant_in_db.substrate_type == "inert_soilless"
+    assert plant_in_db.nickname == "برگ‌انجیری (مونسترا)"
+
+    # Verify DISCOVERY event was logged
+    history = await dt_service.get_plant_history(created_plant_id)
+    assert len(history) >= 1
+    assert history[0].event_type == "DISCOVERY"
+
+
 # ============================================================================
 # 6. Entity Extractor Service Mocking Tests
 # ============================================================================

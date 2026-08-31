@@ -433,6 +433,16 @@ async def test_chat_multi_turn_state_preservation(client: AsyncClient):
     assert "برگ‌انجیری" in data_2["response"] or "مونسترا" in data_2["response"]
     assert "کوکوپیت" in data_2["response"]
     assert "هفته ۱" in data_2["response"]
+    assert data_2["plant_id"] is not None
+
+    # Verify plant is registered in User's Digital Garden
+    garden_res = await client.get("/api/v1/plants", params={"user_id": user_id})
+    assert garden_res.status_code == 200
+    plants_in_garden = garden_res.json()
+    assert len(plants_in_garden) == 1
+    assert plants_in_garden[0]["species_id"] == "monstera_deliciosa"
+    assert plants_in_garden[0]["substrate_type"] == "inert_soilless"
+    assert plants_in_garden[0]["nickname"] == "برگ‌انجیری (مونسترا)"
 
 
 # ============================================================================

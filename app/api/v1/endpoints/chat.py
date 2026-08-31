@@ -173,6 +173,11 @@ async def chat_diagnostic_stream(
                 "reported_symptoms": final_state.get("reported_symptoms", []),
             }
 
+            new_plant_id = final_state.get("plant_id")
+            if new_plant_id and not session_obj.plant_id:
+                session_obj.plant_id = DigitalTwinService._coerce_uuid(new_plant_id)
+                await db.flush()
+
             # Persist agent response & telemetry payload
             await chat_service.save_message(
                 session_id=session_obj.id,
@@ -333,6 +338,11 @@ async def chat_diagnostic(
         "reported_symptoms": final_state.get("reported_symptoms", []),
     }
 
+    new_plant_id = final_state.get("plant_id")
+    if new_plant_id and not session_obj.plant_id:
+        session_obj.plant_id = DigitalTwinService._coerce_uuid(new_plant_id)
+        await db.flush()
+
     # 4. Persist agent response & telemetry payload
     await chat_service.save_message(
         session_id=session_obj.id,
@@ -340,6 +350,7 @@ async def chat_diagnostic(
         content=agent_response_text,
         payload=agent_payload,
     )
+    await db.commit()
 
     return ChatResponse(
         session_id=active_session_id,

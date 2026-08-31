@@ -182,7 +182,14 @@ export const useChatStore = defineStore('chat', () => {
               if (response.response) {
                 a.text = response.response;
               }
-              a.plant_id = response.plant_id || targetPlantId;
+              if (response.plant_id) {
+                a.plant_id = response.plant_id;
+                if (!selectedPlantId.value) {
+                  selectedPlantId.value = response.plant_id;
+                }
+              } else {
+                a.plant_id = targetPlantId;
+              }
               a.risk_level = response.risk_level;
               a.risk_type = response.risk_type;
               a.risk_message = response.risk_message;
