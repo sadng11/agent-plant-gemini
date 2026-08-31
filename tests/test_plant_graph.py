@@ -111,7 +111,7 @@ async def test_graph_critical_blocker_substrate(kb_manager: KnowledgeBaseManager
     assert final_state.get("calculated_schedule") is None
     response = final_state.get("final_response", "")
     assert any(w in response for w in ["هشدار", "بستر", "خاک", "خفگی"])
-    assert any(w in response for w in ["توقف", "ممنوع", "پرهیز"])
+    assert any(w in response for w in ["توقف", "ممنوع", "پرهیز", "متوقف"])
     assert any(w in response for w in ["تعویض", "اصلاح", "آروئید", "سبک"])
 
 

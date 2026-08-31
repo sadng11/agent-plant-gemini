@@ -124,6 +124,29 @@ class PlantDiagnosticGraph:
     async def node_extract_and_resolve(self, state: PlantCareState) -> Dict[str, Any]:
         user_message = state.get("user_message", "")
         msg_lower = user_message.lower()
+        plant_id = state.get("plant_id")
+        user_id = state.get("user_id")
+
+        # 0. Pre-fill baseline plant data from DB if plant_id is provided
+        if plant_id and self.digital_twin_service:
+            try:
+                plant = await self.digital_twin_service.get_plant_by_id(plant_id, user_id=user_id)
+                if plant:
+                    if not state.get("resolved_species_id"):
+                        state["resolved_species_id"] = plant.species_id
+                    if not state.get("resolved_substrate_id"):
+                        state["resolved_substrate_id"] = plant.substrate_type
+                    if not state.get("resolved_trait_ids") and plant.traits is not None:
+                        state["resolved_trait_ids"] = list(plant.traits)
+                    if state.get("trait_confirmed") is None and plant.traits is not None:
+                        state["trait_confirmed"] = bool(plant.traits and "variegated_foliage" in plant.traits)
+                    if not state.get("resolved_phase_id"):
+                        state["resolved_phase_id"] = plant.current_phase
+                    if state.get("health_status") in [None, "UNKNOWN"]:
+                        state["health_status"] = plant.health_status
+                        state["health_confirmed"] = True if plant.health_status in ["HEALTHY", "OPTIMAL"] else False
+            except Exception as exc:
+                logger.warning(f"Error loading baseline plant {plant_id} from DB: {exc}")
 
         # 1. Extract entities using Extractor Service for incoming message
         new_extracted_obj = await self.extractor.extract_entities_from_message(user_message)
