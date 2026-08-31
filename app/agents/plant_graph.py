@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 from langgraph.graph import END, START, StateGraph
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential
 
 from app.core.agronomy_engine import AgronomyEngine
 from app.core.kb_loader import KnowledgeBaseManager, default_kb_manager
@@ -526,25 +527,31 @@ class PlantDiagnosticGraph:
     async def _call_llm_synthesizer(self, system_prompt: str, user_prompt: str) -> Optional[str]:
         """
         Invokes the LLM to generate dynamic, natural, highly-engaging Persian responses
-        grounded in the agronomic engine's analytical facts and clinical state.
+        grounded in the agronomic engine's analytical facts and clinical state with automatic retries.
         """
         if not self.extractor or not getattr(self.extractor, "client", None) or not getattr(self.extractor, "api_key", None):
             return None
         try:
-            coro = self.extractor.client.chat.completions.create(
-                model=self.extractor.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.4,
-            )
-            response = await asyncio.wait_for(coro, timeout=30.0)
-            content = response.choices[0].message.content
-            if content and content.strip():
-                return content.strip()
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=4),
+                reraise=True,
+            ):
+                with attempt:
+                    coro = self.extractor.client.chat.completions.create(
+                        model=self.extractor.model_name,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        temperature=0.4,
+                    )
+                    response = await asyncio.wait_for(coro, timeout=30.0)
+                    content = response.choices[0].message.content
+                    if content and content.strip():
+                        return content.strip()
         except Exception as exc:
-            logger.warning(f"LLM response synthesis failed: {exc}. Using deterministic fallback.")
+            logger.warning(f"LLM response synthesis failed after retries: {exc}. Using deterministic fallback.")
         return None
 
     async def node_synthesize_response(self, state: PlantCareState) -> Dict[str, Any]:

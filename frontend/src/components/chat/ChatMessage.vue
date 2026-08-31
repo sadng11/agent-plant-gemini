@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { User, Sprout, AlertTriangle } from 'lucide-vue-next';
+import { User, Sprout, AlertTriangle, AlertCircle, RotateCcw } from 'lucide-vue-next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import type { UIMessage } from '../../types/chat';
 import RiskTriageBanner from './RiskTriageBanner.vue';
 import FourWeekScheduleCard from './FourWeekScheduleCard.vue';
 import { usePlantStore } from '../../stores/usePlantStore';
+import { useChatStore } from '../../stores/useChatStore';
 
 const props = defineProps<{
   message: UIMessage;
 }>();
 
 const plantStore = usePlantStore();
+const chatStore = useChatStore();
 
 const isAgent = computed(() => props.message.sender === 'agent');
 
@@ -49,29 +51,34 @@ const parsedMarkdown = computed(() => {
     <!-- Avatar -->
     <div
       class="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-sm"
-      :class="
+      :class="[
         isAgent
-          ? 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-emerald-600/20'
+          ? message.is_error
+            ? 'bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-rose-600/20'
+            : 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-emerald-600/20'
           : 'bg-slate-700 text-white shadow-slate-700/20'
-      "
+      ]"
     >
-      <Sprout v-if="isAgent" class="w-5 h-5" />
+      <AlertCircle v-if="isAgent && message.is_error" class="w-5 h-5" />
+      <Sprout v-else-if="isAgent" class="w-5 h-5" />
       <User v-else class="w-5 h-5" />
     </div>
 
     <!-- Message Body -->
     <div
       class="max-w-[85%] sm:max-w-[75%] rounded-2xl p-4 shadow-sm"
-      :class="
+      :class="[
         isAgent
-          ? 'bg-white text-slate-800 border border-slate-200/90 rounded-tr-none'
+          ? message.is_error
+            ? 'bg-rose-50/80 text-slate-800 border border-rose-200 rounded-tr-none'
+            : 'bg-white text-slate-800 border border-slate-200/90 rounded-tr-none'
           : 'bg-emerald-600 text-white rounded-tl-none'
-      "
+      ]"
     >
       <!-- Meta Header for Agent -->
       <div v-if="isAgent" class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-100 text-xs">
-        <div class="flex items-center gap-1.5 font-bold text-emerald-800">
-          <span>دستیار گیاه‌پزشک (PhytoAgent)</span>
+        <div class="flex items-center gap-1.5 font-bold" :class="message.is_error ? 'text-rose-800' : 'text-emerald-800'">
+          <span>{{ message.is_error ? 'خطا در پردازش درخواست' : 'دستیار گیاه‌پزشک (PhytoAgent)' }}</span>
           <span v-if="plantName" class="text-slate-400 font-normal">| پرونده: {{ plantName }}</span>
         </div>
         <span class="text-slate-400 text-[11px]">{{ formattedTime }}</span>
@@ -145,6 +152,22 @@ const parsedMarkdown = computed(() => {
         >
           وضعیت: دارای علائم بیماری / تنش
         </span>
+      </div>
+
+      <!-- Retry Button for Failed Message -->
+      <div
+        v-if="isAgent && message.is_error"
+        class="mt-3 pt-2.5 border-t border-rose-200/80 flex items-center justify-between gap-2"
+      >
+        <span class="text-xs text-rose-700 font-medium">خطا در دریافت پاسخ</span>
+        <button
+          @click="chatStore.retryMessage(message.id)"
+          :disabled="chatStore.isLoading"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white text-xs font-semibold rounded-xl shadow-sm transition-all hover:shadow-md disabled:opacity-50 cursor-pointer"
+        >
+          <RotateCcw class="w-3.5 h-3.5" :class="{ 'animate-spin': chatStore.isLoading }" />
+          <span>تلاش مجدد</span>
+        </button>
       </div>
     </div>
   </div>

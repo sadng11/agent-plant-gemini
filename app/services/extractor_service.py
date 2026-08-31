@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 import openai
 from openai import AsyncOpenAI
 
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential
+
 from app.core.config import settings
 from app.models.agent_state import ExtractedPlantEntities
 
@@ -152,31 +154,41 @@ class EntityExtractorService:
                 api_key=self.api_key,
                 base_url=settings.OPENAI_BASE_URL,
                 timeout=60.0,
+                max_retries=3,
             )
         else:
             self.client = None
 
     async def extract_entities_from_message(self, message: str) -> ExtractedPlantEntities:
         """
-        Extracts structured plant entities from user message using LLM or rule-based fallback.
+        Extracts structured plant entities from user message using LLM with automatic retries
+        or rule-based fallback if retries fail.
         """
         if self.client and self.api_key:
             try:
-                coro = self.client.beta.chat.completions.parse(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                        {"role": "user", "content": message},
-                    ],
-                    response_format=ExtractedPlantEntities,
-                    temperature=0.0,
-                )
-                response = await asyncio.wait_for(coro, timeout=30.0)
-                parsed = response.choices[0].message.parsed
-                if parsed is not None:
-                    return parsed
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=1, max=4),
+                    reraise=True,
+                ):
+                    with attempt:
+                        coro = self.client.beta.chat.completions.parse(
+                            model=self.model_name,
+                            messages=[
+                                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                                {"role": "user", "content": message},
+                            ],
+                            response_format=ExtractedPlantEntities,
+                            temperature=0.0,
+                        )
+                        response = await asyncio.wait_for(coro, timeout=30.0)
+                        parsed = response.choices[0].message.parsed
+                        if parsed is not None:
+                            return parsed
             except Exception as exc:
-                logger.warning(f"OpenAI structured output failed: {exc}. Falling back to rule-based extraction.")
+                logger.warning(
+                    f"OpenAI structured output failed after retries: {exc}. Falling back to rule-based extraction."
+                )
 
         return self._rule_based_extract(message)
 

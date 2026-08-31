@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,8 @@ from app.models.api_schemas import (
 from app.services.chat_history_service import ChatHistoryService
 from app.services.digital_twin_service import DigitalTwinService
 from app.services.extractor_service import EntityExtractorService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -113,7 +116,15 @@ async def chat_diagnostic(
         "extracted_entities": prev_extracted if prev_extracted else None,
     }
 
-    final_state = await graph.ainvoke(initial_state)
+    try:
+        final_state = await graph.ainvoke(initial_state)
+    except Exception as exc:
+        logger.error(f"Error executing plant diagnostic graph: {exc}", exc_info=True)
+        final_state = {
+            "plant_id": initial_state.get("plant_id"),
+            "final_response": "متأسفانه به دلیل اختلال موقت در سرویس هوش مصنوعی، پردازش این پیام با مشکل مواجه شد. لطفاً مجدداً پیام خود را ارسال فرمایید.",
+            "missing_slots": [],
+        }
 
     agent_response_text = final_state.get("final_response", "")
     agent_payload = {

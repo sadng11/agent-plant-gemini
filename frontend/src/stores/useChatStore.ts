@@ -170,10 +170,38 @@ export const useChatStore = defineStore('chat', () => {
         sender: 'agent',
         text: 'متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً اتصال به سرور را بررسی کرده و مجدداً تلاش فرمایید.',
         timestamp: new Date(),
+        is_error: true,
+        failed_text: text.trim(),
+        plant_id: targetPlantId,
       };
       messages.value.push(errorMsg);
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  /**
+   * Retry a failed message
+   */
+  async function retryMessage(errorMessageId?: string) {
+    let failedMsg: UIMessage | undefined;
+    if (errorMessageId) {
+      const idx = messages.value.findIndex((m) => m.id === errorMessageId);
+      if (idx !== -1) {
+        failedMsg = messages.value[idx];
+        messages.value.splice(idx, 1);
+      }
+    } else {
+      const lastErrorIdx = [...messages.value].reverse().findIndex((m) => m.is_error);
+      if (lastErrorIdx !== -1) {
+        const actualIdx = messages.value.length - 1 - lastErrorIdx;
+        failedMsg = messages.value[actualIdx];
+        messages.value.splice(actualIdx, 1);
+      }
+    }
+
+    if (failedMsg && failedMsg.failed_text) {
+      await sendMessage(failedMsg.failed_text, failedMsg.plant_id || undefined);
     }
   }
 
@@ -283,6 +311,7 @@ export const useChatStore = defineStore('chat', () => {
     loadSessions,
     loadActiveSessionMessages,
     sendMessage,
+    retryMessage,
     sendQuickSlotAnswer,
     setContextPlant,
     startNewSession,

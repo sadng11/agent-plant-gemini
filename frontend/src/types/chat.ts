@@ -48,6 +48,8 @@ export interface UIMessage {
   calculated_schedule?: CalculatedSchedule | null;
   missing_slots?: string[];
   extracted_entities?: Record<string, any> | null;
+  is_error?: boolean;
+  failed_text?: string;
 }
 
 export interface ChatSessionInfo {
