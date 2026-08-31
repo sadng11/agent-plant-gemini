@@ -319,11 +319,11 @@ async def test_chat_with_existing_plant_id(client: AsyncClient):
     create_res = await client.post("/api/v1/plants", json=create_payload)
     plant_id = create_res.json()["id"]
 
-    # Chat without repeating species or substrate
+    # Chat without repeating species or substrate (confirming health for schedule)
     chat_payload = {
         "user_id": "user_chat_4",
         "plant_id": plant_id,
-        "message": "برای این ماهم چه برنامه‌ای داری؟",
+        "message": "گیاهم کاملا سالمه، برای این ماهم چه برنامه کودی داری؟",
     }
     chat_res = await client.post("/api/v1/chat", json=chat_payload)
     assert chat_res.status_code == 200

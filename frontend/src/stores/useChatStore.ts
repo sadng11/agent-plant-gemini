@@ -179,6 +179,12 @@ export const useChatStore = defineStore('chat', () => {
 
   function deriveQuickSlots(missingSlots: string[]) {
     const suggestions: string[] = [];
+    if (missingSlots.includes('user_intent')) {
+      suggestions.push('🌿 دریافت برنامه کودی و تغذیه تخصصی');
+      suggestions.push('🩺 عیب‌یابی زردی، لکه برگی یا آفت');
+      suggestions.push('💧 راهنمای آبیاری، نور و شرایط نگهداری');
+      suggestions.push('🪴 راهنمای تعویض گلدان و بستر');
+    }
     if (missingSlots.includes('trait_disambiguation') || missingSlots.includes('traits')) {
       suggestions.push('🌿 سبز ساده و معمولی');
       suggestions.push('🤍 ابلق (دارای بخش‌های سفید/کرم)');

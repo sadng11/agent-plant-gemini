@@ -50,7 +50,7 @@ async def chat_diagnostic(
     prev_health_status: str = "UNKNOWN"
     prev_health_confirmed: Optional[bool] = None
     prev_trait_confirmed: Optional[bool] = None
-    prev_intent: Optional[str] = None
+    prev_user_intent: Optional[str] = None
     prev_reported_symptoms: List[str] = []
     prev_extracted: Dict[str, Any] = {}
 
@@ -71,8 +71,10 @@ async def chat_diagnostic(
                 prev_health_confirmed = m.payload["health_confirmed"]
             if "trait_confirmed" in m.payload and m.payload["trait_confirmed"] is not None:
                 prev_trait_confirmed = m.payload["trait_confirmed"]
-            if m.payload.get("intent"):
-                prev_intent = m.payload["intent"]
+            if m.payload.get("user_intent"):
+                prev_user_intent = m.payload["user_intent"]
+            elif m.payload.get("intent"):
+                prev_user_intent = m.payload["intent"]
             if m.payload.get("reported_symptoms"):
                 prev_reported_symptoms = list(dict.fromkeys(prev_reported_symptoms + (m.payload["reported_symptoms"] or [])))
             if m.payload.get("extracted_entities"):
@@ -105,7 +107,8 @@ async def chat_diagnostic(
         "health_status": prev_health_status,
         "health_confirmed": prev_health_confirmed,
         "trait_confirmed": prev_trait_confirmed,
-        "intent": prev_intent,
+        "user_intent": prev_user_intent,
+        "intent": prev_user_intent,
         "reported_symptoms": prev_reported_symptoms,
         "extracted_entities": prev_extracted if prev_extracted else None,
     }
@@ -129,7 +132,8 @@ async def chat_diagnostic(
         "health_status": final_state.get("health_status"),
         "health_confirmed": final_state.get("health_confirmed"),
         "trait_confirmed": final_state.get("trait_confirmed"),
-        "intent": final_state.get("intent"),
+        "user_intent": final_state.get("user_intent"),
+        "intent": final_state.get("intent") or final_state.get("user_intent"),
         "reported_symptoms": final_state.get("reported_symptoms", []),
     }
 

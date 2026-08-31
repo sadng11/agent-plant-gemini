@@ -2,6 +2,9 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
+UserIntent = Literal["UNSPECIFIED", "FEEDING_CARE", "DIAGNOSIS_SYMPTOM", "GENERAL_CARE"]
+
+
 class ExtractedPlantEntities(BaseModel):
     """
     Structured extraction of plant parameters and user intent from conversation.
@@ -26,9 +29,13 @@ class ExtractedPlantEntities(BaseModel):
         default=None,
         description="User's care goal or requested action, e.g., 'induce_flowering', 'routine_care', 'treatment'.",
     )
-    intent: Optional[Literal["GENERAL_INTRO", "SYMPTOM_DIAGNOSIS", "FERTILIZER_REQUEST", "CARE_INQUIRY", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY"]] = Field(
+    user_intent: UserIntent = Field(
+        default="UNSPECIFIED",
+        description="High-level conversational intent: UNSPECIFIED, FEEDING_CARE, DIAGNOSIS_SYMPTOM, GENERAL_CARE",
+    )
+    intent: Optional[str] = Field(
         default=None,
-        description="High-level conversational intent: GENERAL_INTRO, SYMPTOM_DIAGNOSIS, FERTILIZER_REQUEST, CARE_INQUIRY, HEALTH_CONFIRMATION, REPOTTING_INQUIRY",
+        description="Conversational intent alias for backward compatibility",
     )
     health_status: Optional[Literal["HEALTHY", "SICK_OR_SYMPTOMATIC", "UNKNOWN"]] = Field(
         default="UNKNOWN",
@@ -65,7 +72,8 @@ class PlantCareState(TypedDict, total=False):
 
     # Extracted entity objects
     extracted_entities: Optional[Dict[str, Any]]
-    intent: Optional[Literal["GENERAL_INTRO", "SYMPTOM_DIAGNOSIS", "FERTILIZER_REQUEST", "CARE_INQUIRY", "HEALTH_CONFIRMATION", "REPOTTING_INQUIRY"]]
+    user_intent: Optional[UserIntent]
+    intent: Optional[str]
     health_status: Optional[Literal["HEALTHY", "SICK_OR_SYMPTOMATIC", "UNKNOWN"]]
     health_confirmed: Optional[bool]
     trait_confirmed: Optional[bool]

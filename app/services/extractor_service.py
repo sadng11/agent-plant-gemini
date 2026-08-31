@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -17,16 +18,14 @@ EXTRACTION_SYSTEM_PROMPT = """
 - traits_queries: صفات و ویژگی‌های خاص مورفولوژیکی (مانند ابلق، دورنگ، مینیاتوری، variegated)
 - phase_query: فاز زیستی یا فنولوژیکی جاری (مانند رشد رویشی، گل‌دهی، تشکیل میوه، خواب زمستانه)
 - user_goal: هدف یا خواسته کاربر (مانند routine_care, disease_treatment, induce_flowering, repotting, general_consultation)
-- intent: نیت اصلی گفت‌وگو (یکی از مقادیر: GENERAL_INTRO, SYMPTOM_DIAGNOSIS, FERTILIZER_REQUEST, CARE_INQUIRY, HEALTH_CONFIRMATION, REPOTTING_INQUIRY)
-  * GENERAL_INTRO: معرفی ساده گیاه بدون درخواست صریح کود یا علائم بیماری (مثل «من یک گیاه مونسترا دارم»)
-  * SYMPTOM_DIAGNOSIS: ذکر علائم بیماری، آفت، زردی، پژمردگی، لکه برگی و پوسیدگی
-  * FERTILIZER_REQUEST: درخواست برنامه کودی، دوز کود، تقویت‌کننده یا راهنمایی تغذیه
-  * HEALTH_CONFIRMATION: اعلام سالم و بی‌مشکل بودن گیاه در پاسخ به پرسش ایجنت (مثل «کاملاً سالمه»، «آفت نداره»)
-  * CARE_INQUIRY: پرسش درباره آبیاری، نور، دما یا شرایط محیطی
-  * REPOTTING_INQUIRY: پرسش درباره زمان و روش تعویض گلدان و خاک
+- user_intent: نیت اصلی گفت‌وگو (یکی از مقادیر دقیق: UNSPECIFIED, FEEDING_CARE, DIAGNOSIS_SYMPTOM, GENERAL_CARE)
+  * UNSPECIFIED: کاربر فقط مشخصات گیاه، خاک یا صفت را معرفی کرده و هنوز سوال یا درخواست مشخصی نپرسیده است (مثل: «مونسترا ابلق در کوکوپیت»، «برگ‌انجیری دارم»، «کوکوپیت»، «ابلق است»).
+  * FEEDING_CARE: کاربر صراحتاً درخواست برنامه کودی، دوز کود، جدول تغذیه، تقویت رشد یا خرید کود کرده است (مثل: «برنامه کودی می‌خوام»، «چه کودی بدم؟»، «کوددهی مونسترا»، «دریافت برنامه کودی و تغذیه تخصصی»).
+  * DIAGNOSIS_SYMPTOM: کاربر از علائم بیماری، آفت، زردی برگ، لکه قهوه‌ای، سوختگی، قارچ، کنه یا شپشک صحبت می‌کند (مثل: «برگاش زرد شده»، «کنه زده چیکار کنم»، «عیب‌یابی زردی یا آفت»).
+  * GENERAL_CARE: کاربر درباره نحوه آبیاری، میزان نور، رطوبت، دما، تعویض خاک/گلدان یا شرایط عمومی نگهداری سوال دارد (مثل: «چقدر آب بدم؟»، «نور مناسب مونسترا چقدره؟»، «شرایط نگهداری»، «راهنمای تعویض گلدان»).
 - health_status: وضعیت سلامت گیاه بر اساس پیام (یکی از مقادیر: HEALTHY, SICK_OR_SYMPTOMATIC, UNKNOWN)
 - health_confirmed: تاییدیه صریح سلامت گیاه توسط کاربر:
-  * true: اگر کاربر صریحاً اعلام کند گیاه کاملاً سالم، در حال رشد و بدون آفت/زردی است (مانند «کاملاً سالمه»، «مشکلی نداره»)
+  * true: اگر کاربر صریحاً اعلام کند گیاه کاملاً سالم، در حال رشد و بدون آفت/زردی است (مانند «کاملاً سالمه»، «مشکلی نداره»، «بدون آفت»)
   * false: اگر گیاه دارای آفت، زردی، پوسیدگی یا بیماری باشد
   * null: اگر کاربر صحبتی از سلامت نکرده باشد
 - trait_confirmed: تاییدیه وضعیت ابلق بودن یا سبز ساده بودن گیاه:
@@ -37,7 +36,6 @@ EXTRACTION_SYSTEM_PROMPT = """
 - missing_critical_info: متغیرهای حیاتی نامشخص
 
 در صورت عدم وجود هر یک از موارد، مقدار null یا لیست خالی بگذارید.
-
 """.strip()
 
 
@@ -153,6 +151,7 @@ class EntityExtractorService:
             self.client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=settings.OPENAI_BASE_URL,
+                timeout=60.0,
             )
         else:
             self.client = None
@@ -163,7 +162,7 @@ class EntityExtractorService:
         """
         if self.client and self.api_key:
             try:
-                response = await self.client.beta.chat.completions.parse(
+                coro = self.client.beta.chat.completions.parse(
                     model=self.model_name,
                     messages=[
                         {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
@@ -172,6 +171,7 @@ class EntityExtractorService:
                     response_format=ExtractedPlantEntities,
                     temperature=0.0,
                 )
+                response = await asyncio.wait_for(coro, timeout=30.0)
                 parsed = response.choices[0].message.parsed
                 if parsed is not None:
                     return parsed
@@ -218,6 +218,11 @@ class EntityExtractorService:
                 break
 
         # 5. Symptoms & Pathology Detection
+        # Remove negated health phrases first so "بدون آفت" does not trigger "آفت"
+        clean_msg_for_symptoms = msg
+        for neg_term in ["بدون آفت", "بدون لکه", "بدون بیماری", "بدون مشکل", "آفت نداره", "بیماری نداره", "لکه نداره", "مشکلی نداره", "مشکل نداره", "no pests", "no disease"]:
+            clean_msg_for_symptoms = clean_msg_for_symptoms.replace(neg_term, "")
+
         symptom_keywords = {
             "زرد": "زردی برگ (Chlorosis)",
             "سیاه": "سیاه شدن ساقه/برگ (Necrosis)",
@@ -235,10 +240,22 @@ class EntityExtractorService:
             "شل": "شل شدن و له‌شدگی بافت",
         }
         for kw, sym_label in symptom_keywords.items():
-            if kw in msg:
+            if kw in clean_msg_for_symptoms:
                 symptoms.append(sym_label)
 
-        # 6. Health Confirmation Detection
+        # 6. User Goal Detection
+        if any(term in msg for term in ["گل بده", "گلدهی", "میوه", "شکوفه", "flowering", "fruit", "باردهی", "میوه بیاره"]):
+            user_goal = "induce_flowering"
+        elif any(term in msg for term in ["تعویض گلدان", "تعویض خاک", "repotting", "repot"]):
+            user_goal = "repotting"
+        elif symptoms or any(term in msg for term in ["بیمار", "آفت", "قارچ", "کنه", "شپشک", "زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه", "ریزش", "عیب‌یابی", "درمان"]):
+            user_goal = "disease_treatment"
+        elif any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "تغذیه"]):
+            user_goal = "routine_care"
+        else:
+            user_goal = "general_consultation"
+
+        # 7. Health Confirmation Detection
         health_positive_terms = [
             "کاملا سالم", "کاملاً سالم", "سالم است", "سالمه", "مشکلی نداره",
             "مشکل نداره", "بدون آفت", "آفت نداره", "بیماری نداره",
@@ -247,7 +264,7 @@ class EntityExtractorService:
         ]
         is_health_confirmed = any(term in msg for term in health_positive_terms)
 
-        # 7. Trait Confirmation Detection
+        # 8. Trait Confirmation Detection
         trait_plain_terms = [
             "سبز ساده", "سبز معمولی", "سبز یکدست", "سبز است", "سبزه",
             "ابلق نیست", "ساده است", "معمولی است", "plain green", "green"
@@ -264,41 +281,40 @@ class EntityExtractorService:
             trait_confirmed = False
 
         health_confirmed: Optional[bool] = None
-        if symptoms:
-            intent = "SYMPTOM_DIAGNOSIS"
+        user_intent: str = "UNSPECIFIED"
+
+        if symptoms or any(term in clean_msg_for_symptoms for term in ["بیمار", "آفت", "قارچ", "کنه", "شپشک", "زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه", "ریزش", "عیب‌یابی", "درمان"]):
+            user_intent = "DIAGNOSIS_SYMPTOM"
             health_status = "SICK_OR_SYMPTOMATIC"
             health_confirmed = False
-            user_goal = "disease_treatment"
         elif is_health_confirmed:
             health_status = "HEALTHY"
             health_confirmed = True
-            if any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "جدول", "تغذیه"]):
-                intent = "FERTILIZER_REQUEST"
-                user_goal = "routine_care"
+            if any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "جدول", "تغذیه", "گل بده", "میوه"]):
+                user_intent = "FEEDING_CARE"
             else:
-                intent = "HEALTH_CONFIRMATION"
-                user_goal = "routine_care"
-        elif any(term in msg for term in ["گل بده", "میوه بده", "میوه‌دهی", "شکوفه", "گلدهی", "flowering", "fruit"]):
-            intent = "FERTILIZER_REQUEST"
-            user_goal = "induce_flowering"
-        elif any(term in msg for term in ["تعویض خاک", "تعویض گلدان", "repotting"]):
-            intent = "REPOTTING_INQUIRY"
-            user_goal = "repotting"
-        elif any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه کودی", "برنامه کود", "برنامه", "چه کودی", "تغذیه", "feeding", "fertilizer", "جدول"]):
-            intent = "FERTILIZER_REQUEST"
-            user_goal = "routine_care"
-        elif any(term in msg for term in ["آبیاری", "چقدر آب", "نور", "رطوبت", "دما", "نگهداری"]):
-            intent = "CARE_INQUIRY"
-            user_goal = "general_consultation"
+                user_intent = "UNSPECIFIED"
+        elif any(term in msg for term in [
+            "کود", "کوددهی", "کود دهی", "کود دهم", "کود بدم", "برنامه کودی", "برنامه کود",
+            "تقویت", "جدول کودی", "تغذیه", "تغذیه تخصصی", "نسخه کودی", "npk",
+            "fertilizer", "feeding", "چه کودی", "کود مناسب", "برنامه تغذیه", "تقویت رشد",
+            "دریافت برنامه کودی", "گل بده", "میوه بده", "میوه‌دهی", "شکوفه", "گلدهی", "flowering", "fruit"
+        ]):
+            user_intent = "FEEDING_CARE"
+        elif any(term in msg for term in [
+            "آبیاری", "آب بدم", "چقدر آب", "نور", "لوکس", "رطوبت", "دما", "نگهداری",
+            "شرایط نگهداری", "تعویض خاک", "تعویض گلدان", "repot", "repotting", "هرس",
+            "قلمه", "مراقبت", "راهنمای آبیاری", "راهنمای تعویض"
+        ]):
+            user_intent = "GENERAL_CARE"
         else:
-            intent = "GENERAL_INTRO"
-            user_goal = "general_consultation"
+            user_intent = "UNSPECIFIED"
 
         # 8. Missing Critical Info
         missing: List[str] = []
         if not species_q:
             missing.append("species")
-        if intent == "FERTILIZER_REQUEST" and not substrate_q:
+        if user_intent == "FEEDING_CARE" and not substrate_q:
             missing.append("substrate")
 
         return ExtractedPlantEntities(
@@ -307,7 +323,8 @@ class EntityExtractorService:
             traits_queries=traits_q,
             phase_query=phase_q,
             user_goal=user_goal,
-            intent=intent,
+            user_intent=user_intent,
+            intent=user_intent,
             health_status=health_status,
             health_confirmed=health_confirmed,
             trait_confirmed=trait_confirmed,
