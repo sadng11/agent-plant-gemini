@@ -249,6 +249,48 @@ async def test_graph_auto_creates_digital_twin_when_species_and_substrate_resolv
     assert history[0].event_type == "DISCOVERY"
 
 
+@pytest.mark.asyncio
+async def test_graph_updates_plant_health_to_symptomatic_on_symptoms(
+    kb_manager: KnowledgeBaseManager,
+    db_session: AsyncSession,
+):
+    """When user reports symptoms for an existing plant in chat, plant health status in DB must update to SICK_OR_SYMPTOMATIC."""
+    dt_service = DigitalTwinService(session=db_session)
+    plant = await dt_service.create_plant(
+        user_id="user_symptom_test",
+        nickname="Healthy Plant",
+        species_id="monstera_deliciosa",
+        substrate_type="inert_soilless",
+        health_status="HEALTHY",
+    )
+
+    graph = create_plant_care_graph(
+        kb_manager=kb_manager,
+        digital_twin_service=dt_service,
+    )
+
+    initial_state: PlantCareState = {
+        "user_id": "user_symptom_test",
+        "session_id": "sess_symptom_1",
+        "plant_id": str(plant.id),
+        "user_message": "برگاش زرد شده و لکه برگی و آفت داره",
+    }
+
+    final_state = await graph.ainvoke(initial_state)
+
+    assert final_state.get("risk_level") == "CRITICAL_BLOCKER"
+    assert final_state.get("risk_type") == "PATHOLOGY"
+
+    # Verify plant in database was updated to SICK_OR_SYMPTOMATIC
+    updated_plant = await dt_service.get_plant_by_id(plant.id)
+    assert updated_plant is not None
+    assert updated_plant.health_status == "SICK_OR_SYMPTOMATIC"
+
+    # Verify DIAGNOSTIC_WARNING was logged
+    history = await dt_service.get_plant_history(plant.id)
+    assert any(ev.event_type == "DIAGNOSTIC_WARNING" for ev in history)
+
+
 # ============================================================================
 # 6. Entity Extractor Service Mocking Tests
 # ============================================================================

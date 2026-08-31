@@ -44,16 +44,28 @@ const phaseLabel = computed(() => {
 
 const healthBadge = computed(() => {
   const status = props.plant.health_status;
-  if (status === 'ROOT_ROT_RISK' || status === 'CRITICAL') {
+  if (status === 'ROOT_ROT_RISK') {
     return {
-      label: '⚠️ خطر پوسیدگی ریشه',
+      label: '⛔ خطر پوسیدگی ریشه (بستر نامناسب)',
       bgClass: 'bg-rose-100 text-rose-800 border-rose-200',
+      icon: AlertTriangle,
+    };
+  }
+  if (
+    status === 'SICK_OR_SYMPTOMATIC' ||
+    status === 'CRITICAL' ||
+    status === 'PATHOLOGY' ||
+    status === 'SICK'
+  ) {
+    return {
+      label: '🩺 دارای علائم تنش / بیماری / آفت',
+      bgClass: 'bg-red-100 text-red-800 border-red-200',
       icon: AlertTriangle,
     };
   }
   if (status === 'SUB_OPTIMAL' || status === 'WARNING') {
     return {
-      label: 'هشدار تغذیه‌ای',
+      label: '⚠️ هشدار تغذیه‌ای',
       bgClass: 'bg-amber-100 text-amber-800 border-amber-200',
       icon: AlertTriangle,
     };

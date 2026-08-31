@@ -14,8 +14,17 @@ const isGardenActive = computed(() => route.path.startsWith('/garden') || route.
 const isChatActive = computed(() => route.path.startsWith('/chat'));
 
 const plantCount = computed(() => plantStore.plants.length);
-const attentionCount = computed(() => 
-  plantStore.plants.filter(p => p.health_status === 'ROOT_ROT_RISK' || p.health_status === 'CRITICAL').length
+const attentionCount = computed(() =>
+  plantStore.plants.filter(
+    (p) =>
+      p.health_status === 'ROOT_ROT_RISK' ||
+      p.health_status === 'CRITICAL' ||
+      p.health_status === 'SICK_OR_SYMPTOMATIC' ||
+      p.health_status === 'PATHOLOGY' ||
+      p.health_status === 'SUB_OPTIMAL' ||
+      p.health_status === 'WARNING' ||
+      p.health_status === 'SICK'
+  ).length
 );
 
 function navigateTo(path: string) {

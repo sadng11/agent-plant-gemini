@@ -51,7 +51,16 @@ const filteredPlants = computed(() => {
       return matchesSearch && (p.health_status === 'HEALTHY' || p.health_status === 'OPTIMAL');
     }
     if (filterStatus.value === 'ATTENTION') {
-      return matchesSearch && (p.health_status === 'ROOT_ROT_RISK' || p.health_status === 'CRITICAL' || p.health_status === 'SUB_OPTIMAL');
+      return (
+        matchesSearch &&
+        (p.health_status === 'ROOT_ROT_RISK' ||
+          p.health_status === 'CRITICAL' ||
+          p.health_status === 'SUB_OPTIMAL' ||
+          p.health_status === 'SICK_OR_SYMPTOMATIC' ||
+          p.health_status === 'PATHOLOGY' ||
+          p.health_status === 'WARNING' ||
+          p.health_status === 'SICK')
+      );
     }
     return matchesSearch;
   });
@@ -60,7 +69,16 @@ const filteredPlants = computed(() => {
 const stats = computed(() => {
   const total = plantStore.plants.length;
   const healthy = plantStore.plants.filter((p) => p.health_status === 'HEALTHY' || p.health_status === 'OPTIMAL').length;
-  const attention = plantStore.plants.filter((p) => p.health_status === 'ROOT_ROT_RISK' || p.health_status === 'CRITICAL' || p.health_status === 'SUB_OPTIMAL').length;
+  const attention = plantStore.plants.filter(
+    (p) =>
+      p.health_status === 'ROOT_ROT_RISK' ||
+      p.health_status === 'CRITICAL' ||
+      p.health_status === 'SUB_OPTIMAL' ||
+      p.health_status === 'SICK_OR_SYMPTOMATIC' ||
+      p.health_status === 'PATHOLOGY' ||
+      p.health_status === 'WARNING' ||
+      p.health_status === 'SICK'
+  ).length;
   return { total, healthy, attention };
 });
 

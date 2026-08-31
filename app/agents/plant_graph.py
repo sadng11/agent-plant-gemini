@@ -493,30 +493,57 @@ class PlantDiagnosticGraph:
         health_confirmed = state.get("health_confirmed")
         reported_symptoms = state.get("reported_symptoms") or []
         intent = state.get("intent")
+        plant_id = state.get("plant_id")
+
+        risk_level = "OPTIMAL"
+        risk_type = None
+        risk_message = None
 
         # 1. Pathology / Disease / Pest Triage
         if health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or intent == "SYMPTOM_DIAGNOSIS":
             symptom_str = "، ".join(reported_symptoms) if reported_symptoms else "زردی برگ، علائم آفت یا تنش فیزیولوژیکی"
-            return {
-                "risk_level": "CRITICAL_BLOCKER",
-                "risk_type": "PATHOLOGY",
-                "risk_message": f"گیاه دارای علائم تنش/بیماری ({symptom_str}) است. به دلیل آسیب به بافت‌ها و ریشه‌های مویین، مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای گیاه متوقف می‌شود.",
-            }
+            risk_level = "CRITICAL_BLOCKER"
+            risk_type = "PATHOLOGY"
+            risk_message = f"گیاه دارای علائم تنش/بیماری ({symptom_str}) است. به دلیل آسیب به بافت‌ها و ریشه‌های مویین، مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای گیاه متوقف می‌شود."
+            health_status = "SICK_OR_SYMPTOMATIC"
 
         # 2. Substrate Risk Triage
-        if species_data and substrate_id:
+        elif species_data and substrate_id:
             species_model = SpeciesModel(**species_data)
-            risk_level, risk_message = AgronomyEngine.evaluate_substrate_risk(species_model, substrate_id)
-            return {
-                "risk_level": risk_level,
-                "risk_type": "SUBSTRATE" if risk_level == "CRITICAL_BLOCKER" else None,
-                "risk_message": risk_message,
-            }
+            sub_risk_level, sub_risk_message = AgronomyEngine.evaluate_substrate_risk(species_model, substrate_id)
+            risk_level = sub_risk_level
+            risk_type = "SUBSTRATE" if sub_risk_level == "CRITICAL_BLOCKER" else None
+            risk_message = sub_risk_message
+            if sub_risk_level == "CRITICAL_BLOCKER":
+                health_status = "ROOT_ROT_RISK"
+
+        # Sync risk/pathology status to database digital twin
+        if self.digital_twin_service and plant_id:
+            try:
+                if risk_type == "PATHOLOGY":
+                    await self.digital_twin_service.update_plant_state(plant_id, {"health_status": "SICK_OR_SYMPTOMATIC"})
+                    await self.digital_twin_service.log_event(
+                        plant_id=plant_id,
+                        event_type="DIAGNOSTIC_WARNING",
+                        details={"risk_type": "PATHOLOGY", "risk_message": risk_message},
+                    )
+                elif risk_type == "SUBSTRATE":
+                    await self.digital_twin_service.update_plant_state(plant_id, {"health_status": "ROOT_ROT_RISK"})
+                    await self.digital_twin_service.log_event(
+                        plant_id=plant_id,
+                        event_type="DIAGNOSTIC_WARNING",
+                        details={"risk_type": "SUBSTRATE", "risk_message": risk_message},
+                    )
+                elif health_confirmed is True and health_status == "HEALTHY":
+                    await self.digital_twin_service.update_plant_state(plant_id, {"health_status": "HEALTHY"})
+            except Exception as exc:
+                logger.warning(f"Failed to sync digital twin health state in triage: {exc}")
 
         return {
-            "risk_level": "OPTIMAL",
-            "risk_type": None,
-            "risk_message": None,
+            "risk_level": risk_level,
+            "risk_type": risk_type,
+            "risk_message": risk_message,
+            "health_status": health_status,
         }
 
     # =========================================================================
