@@ -247,7 +247,7 @@ async def test_chat_missing_slots(client: AsyncClient):
     assert res.status_code == 200
     data = res.json()
     assert "species" in data["missing_slots"]
-    assert any(w in data["response"] for w in ["نام یا گونه", "گونه", "نام", "گیاه", "فیتوایجنت"])
+    assert any(w in data["response"] for w in ["نام یا گونه", "گونه", "نام", "گیاه", "فیتو"])
 
 
 @pytest.mark.asyncio

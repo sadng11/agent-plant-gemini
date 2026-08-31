@@ -49,6 +49,8 @@ export interface UIMessage {
   missing_slots?: string[];
   extracted_entities?: Record<string, any> | null;
   is_error?: boolean;
+  is_failed?: boolean;
+  is_sending?: boolean;
   failed_text?: string;
 }
 

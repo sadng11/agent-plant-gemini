@@ -1,12 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import AppHeader from './components/layout/AppHeader.vue';
 import TabNavigation from './components/layout/TabNavigation.vue';
-import GardenDashboard from './components/garden/GardenDashboard.vue';
-import ChatWindow from './components/chat/ChatWindow.vue';
-import KbExplorer from './components/kb/KbExplorer.vue';
-
-const activeTab = ref<'garden' | 'chat' | 'kb'>('garden');
 </script>
 
 <template>
@@ -15,37 +9,23 @@ const activeTab = ref<'garden' | 'chat' | 'kb'>('garden');
     <AppHeader />
 
     <!-- Tab Navigation -->
-    <TabNavigation
-      :active-tab="activeTab"
-      @update:active-tab="activeTab = $event"
-    />
+    <TabNavigation />
 
     <!-- Main Workspace Content -->
     <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <Transition name="fade" mode="out-in">
-        <!-- Garden Tab -->
-        <GardenDashboard
-          v-if="activeTab === 'garden'"
-          @navigate-to-chat="activeTab = 'chat'"
-        />
-
-        <!-- Diagnostic Chat Tab -->
-        <ChatWindow
-          v-else-if="activeTab === 'chat'"
-        />
-
-        <!-- Knowledge Base Explorer Tab -->
-        <KbExplorer
-          v-else-if="activeTab === 'kb'"
-        />
-      </Transition>
+      <RouterView v-slot="{ Component }">
+        <Transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </RouterView>
     </main>
+
 
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 py-4 mt-auto">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
         <div class="flex items-center gap-2">
-          <span>🌿 فیتوایجنت (PhytoAgent)</span>
+          <span>🌿 فیتو (PhytoAgent)</span>
           <span>•</span>
           <span>سامانه هوشمند گیاه‌پزشکی و برنامه‌ریزی تغذیه</span>
         </div>

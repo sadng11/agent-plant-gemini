@@ -56,10 +56,12 @@ const parsedMarkdown = computed(() => {
           ? message.is_error
             ? 'bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-rose-600/20'
             : 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-emerald-600/20'
-          : 'bg-slate-700 text-white shadow-slate-700/20'
+          : message.is_failed
+            ? 'bg-gradient-to-br from-rose-600 to-rose-800 text-white shadow-rose-600/20'
+            : 'bg-slate-700 text-white shadow-slate-700/20'
       ]"
     >
-      <AlertCircle v-if="isAgent && message.is_error" class="w-5 h-5" />
+      <AlertCircle v-if="(isAgent && message.is_error) || (!isAgent && message.is_failed)" class="w-5 h-5" />
       <Sprout v-else-if="isAgent" class="w-5 h-5" />
       <User v-else class="w-5 h-5" />
     </div>
@@ -72,7 +74,9 @@ const parsedMarkdown = computed(() => {
           ? message.is_error
             ? 'bg-rose-50/80 text-slate-800 border border-rose-200 rounded-tr-none'
             : 'bg-white text-slate-800 border border-slate-200/90 rounded-tr-none'
-          : 'bg-emerald-600 text-white rounded-tl-none'
+          : message.is_failed
+            ? 'bg-rose-700 text-white rounded-tl-none border border-rose-500 shadow-rose-700/10'
+            : 'bg-emerald-600 text-white rounded-tl-none'
       ]"
     >
       <!-- Meta Header for Agent -->
@@ -84,17 +88,38 @@ const parsedMarkdown = computed(() => {
         <span class="text-slate-400 text-[11px]">{{ formattedTime }}</span>
       </div>
 
-      <!-- User Timestamp -->
-      <div v-else class="flex items-center justify-end text-[11px] text-emerald-100 mb-1">
+      <!-- User Timestamp & Failed Status -->
+      <div v-else class="flex items-center justify-between text-[11px] mb-1.5" :class="message.is_failed ? 'text-rose-200' : 'text-emerald-100'">
+        <span v-if="message.is_failed" class="font-semibold flex items-center gap-1 text-amber-200">
+          <AlertTriangle class="w-3.5 h-3.5" />
+          ارسال به سرور با خطا مواجه شد
+        </span>
+        <span v-else></span>
         <span>{{ formattedTime }}</span>
       </div>
 
       <!-- Main Message Text with Markdown rendering and RTL styling -->
       <div
         class="text-sm leading-relaxed font-normal markdown-body"
-        :class="isAgent ? 'markdown-agent text-slate-800' : 'markdown-user text-emerald-50'"
+        :class="isAgent ? 'markdown-agent text-slate-800' : 'markdown-user text-white'"
         v-html="parsedMarkdown"
       />
+
+      <!-- User Message Retry Action Button -->
+      <div
+        v-if="!isAgent && message.is_failed"
+        class="mt-3 pt-2.5 border-t border-rose-600/80 flex items-center justify-between gap-2"
+      >
+        <span class="text-xs text-rose-100 font-medium">عدم دریافت پاسخ از سرور</span>
+        <button
+          @click="chatStore.retryUserMessage(message.id)"
+          :disabled="chatStore.isLoading"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-rose-50 active:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl shadow-sm transition-all hover:shadow-md disabled:opacity-50 cursor-pointer"
+        >
+          <RotateCcw class="w-3.5 h-3.5" :class="{ 'animate-spin': chatStore.isLoading }" />
+          <span>ارسال مجدد</span>
+        </button>
+      </div>
 
       <!-- Feasibility Warning Banner if UNREALISTIC -->
       <div

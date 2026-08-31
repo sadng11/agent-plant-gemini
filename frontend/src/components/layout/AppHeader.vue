@@ -30,7 +30,7 @@ onMounted(async () => {
           </div>
           <div>
             <div class="flex items-center space-x-2 space-x-reverse">
-              <h1 class="text-xl font-bold text-slate-900 tracking-tight">فیتوایجنت</h1>
+              <h1 class="text-xl font-bold text-slate-900 tracking-tight">فیتو</h1>
               <span class="px-2 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full">
                 نسخه ۵.۰
               </span>

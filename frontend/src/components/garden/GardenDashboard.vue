@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   Plus,
   Search,
@@ -16,6 +17,7 @@ import PlantCard from './PlantCard.vue';
 import AddPlantModal from './AddPlantModal.vue';
 import PlantHistoryModal from './PlantHistoryModal.vue';
 
+const router = useRouter();
 const emit = defineEmits<{
   (e: 'navigate-to-chat'): void;
 }>();
@@ -68,6 +70,7 @@ function handleOpenHistory(plant: PlantResponse) {
 
 function handleStartChat(plant: PlantResponse) {
   chatStore.setContextPlant(plant.id);
+  router.push({ path: '/chat', query: { plantId: plant.id } });
   emit('navigate-to-chat');
 }
 </script>

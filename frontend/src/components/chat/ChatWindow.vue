@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import {
   Send,
   Trash2,
@@ -17,6 +18,7 @@ import { usePlantStore } from '../../stores/usePlantStore';
 import ChatMessage from './ChatMessage.vue';
 import QuickSlotChips from './QuickSlotChips.vue';
 
+const route = useRoute();
 const chatStore = useChatStore();
 const plantStore = usePlantStore();
 
@@ -47,6 +49,9 @@ watch(
 );
 
 onMounted(async () => {
+  if (route.query.plantId && typeof route.query.plantId === 'string') {
+    chatStore.setContextPlant(route.query.plantId);
+  }
   await chatStore.init();
   scrollToBottom();
 });

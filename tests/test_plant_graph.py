@@ -86,7 +86,7 @@ async def test_graph_missing_critical_slots(kb_manager: KnowledgeBaseManager):
 
     assert "species" in final_state.get("missing_slots", [])
     assert final_state.get("final_response") is not None
-    assert any(w in final_state["final_response"] for w in ["گونه", "نام", "گیاه", "فیتوایجنت"])
+    assert any(w in final_state["final_response"] for w in ["گونه", "نام", "گیاه", "فیتو"])
 
 
 # ============================================================================

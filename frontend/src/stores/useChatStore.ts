@@ -13,7 +13,7 @@ export const useChatStore = defineStore('chat', () => {
   const welcomeMessage: UIMessage = {
     id: 'welcome-msg',
     sender: 'agent',
-    text: 'سلام و درود 🌱 من «فیتوایجنت»، دستیار تخصصی گیاه‌پزشکی و برنامه‌ریزی تغذیه گیاهان شما هستم.\n\nمی‌توانید وضعیت یا مشکل گیاهتان (مانند زردی برگ، توقف رشد، برنامه کودی مناسب، نوع بستر و...) را مطرح کنید یا از باغچه خود یکی از گیاهان را برای مشاوره اختصاصی انتخاب نمایید.',
+    text: 'سلام و درود 🌱 من «فیتو»، دستیار تخصصی گیاه‌پزشکی و برنامه‌ریزی تغذیه گیاهان شما هستم.\n\nمی‌توانید وضعیت یا مشکل گیاهتان (مانند زردی برگ، توقف رشد، برنامه کودی مناسب، نوع بستر و...) را مطرح کنید یا از باغچه خود یکی از گیاهان را برای مشاوره اختصاصی انتخاب نمایید.',
     timestamp: new Date(),
   };
 
@@ -111,6 +111,8 @@ export const useChatStore = defineStore('chat', () => {
       text: text.trim(),
       timestamp: new Date(),
       plant_id: targetPlantId,
+      is_sending: true,
+      is_failed: false,
     };
     messages.value.push(userMsg);
 
@@ -125,6 +127,9 @@ export const useChatStore = defineStore('chat', () => {
         session_id: sessionId.value || undefined,
         plant_id: targetPlantId || undefined,
       });
+
+      userMsg.is_sending = false;
+      userMsg.is_failed = false;
 
       // Update session ID if created or returned
       if (response.session_id) {
@@ -164,6 +169,8 @@ export const useChatStore = defineStore('chat', () => {
         await plantStore.fetchPlants();
       }
     } catch (err: any) {
+      userMsg.is_sending = false;
+      userMsg.is_failed = true;
       error.value = err.message || 'خطا در برقراری ارتباط با دستیار گیاه‌پزشک';
       const errorMsg: UIMessage = {
         id: 'agent-err-' + Date.now(),
@@ -181,7 +188,31 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * Retry a failed message
+   * Retry sending a failed user message
+   */
+  async function retryUserMessage(userMessageId: string) {
+    const userMsgIdx = messages.value.findIndex((m) => m.id === userMessageId && m.sender === 'user');
+    if (userMsgIdx === -1) return;
+
+    const userMsg = messages.value[userMsgIdx];
+    const textToResend = userMsg.text;
+    const plantId = userMsg.plant_id || undefined;
+
+    // Remove any following error message matching this text
+    const followingMsg = messages.value[userMsgIdx + 1];
+    if (followingMsg && followingMsg.is_error && followingMsg.failed_text === textToResend) {
+      messages.value.splice(userMsgIdx + 1, 1);
+    }
+
+    // Remove the old failed user message
+    messages.value.splice(userMsgIdx, 1);
+
+    // Resend cleanly
+    await sendMessage(textToResend, plantId);
+  }
+
+  /**
+   * Retry a failed message from error bubble or default
    */
   async function retryMessage(errorMessageId?: string) {
     let failedMsg: UIMessage | undefined;
@@ -201,6 +232,15 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     if (failedMsg && failedMsg.failed_text) {
+      // Also remove preceding failed user message if present
+      const failedUserIdx = [...messages.value].reverse().findIndex(
+        (m) => m.sender === 'user' && m.is_failed && m.text === failedMsg?.failed_text
+      );
+      if (failedUserIdx !== -1) {
+        const actualUserIdx = messages.value.length - 1 - failedUserIdx;
+        messages.value.splice(actualUserIdx, 1);
+      }
+
       await sendMessage(failedMsg.failed_text, failedMsg.plant_id || undefined);
     }
   }
@@ -312,6 +352,7 @@ export const useChatStore = defineStore('chat', () => {
     loadActiveSessionMessages,
     sendMessage,
     retryMessage,
+    retryUserMessage,
     sendQuickSlotAnswer,
     setContextPlant,
     startNewSession,
@@ -319,4 +360,5 @@ export const useChatStore = defineStore('chat', () => {
     init,
   };
 });
+
 
