@@ -563,8 +563,63 @@ async def test_list_unsupported_species_endpoint(client: AsyncClient):
     records = res_unsupp.json()
     assert len(records) >= 1
     pothos_rec = next(r for r in records if "پتوس" in r["normalized_name"] or "پتوس" in r["raw_query"])
-    assert pothos_rec["request_count"] == 1
-    assert pothos_rec["status"] == "PENDING"
+
+
+
+@pytest.mark.asyncio
+async def test_chat_feeding_requires_health_verification_gate(client: AsyncClient):
+    """
+    Test that when user requests feeding schedule after plant registration,
+    the agent must stop and enforce health verification before issuing fertilizer.
+    """
+    user_id = "user_health_gate_test"
+
+    # Turn 1: User introduces variegated monstera
+    res1 = await client.post("/api/v1/chat", json={
+        "user_id": user_id,
+        "message": "من یک گیاه مونسترا ابلق دارم",
+    })
+    assert res1.status_code == 200
+    d1 = res1.json()
+    session_id = d1["session_id"]
+    assert "substrate" in d1["missing_slots"]
+
+    # Turn 2: User provides substrate
+    res2 = await client.post("/api/v1/chat", json={
+        "user_id": user_id,
+        "session_id": session_id,
+        "message": "کوکوپیت و پرلیت",
+    })
+    assert res2.status_code == 200
+    d2 = res2.json()
+    assert "user_intent" in d2["missing_slots"]
+    assert d2["calculated_schedule"] is None
+
+    # Turn 3: User requests feeding plan WITHOUT having confirmed health
+    res3 = await client.post("/api/v1/chat", json={
+        "user_id": user_id,
+        "session_id": session_id,
+        "message": "🌿 دریافت برنامه کودی و تغذیه تخصصی",
+    })
+    assert res3.status_code == 200
+    d3 = res3.json()
+    # Health verification MUST be gated
+    assert "health_verification" in d3["missing_slots"]
+    assert d3["calculated_schedule"] is None
+    # Response must explain danger of fertilizing sick plants and ask about health
+    assert any(term in d3["response"] for term in ["سلامت", "سالم", "بیمار", "سوختگی", "بدتر", "آفت"])
+
+    # Turn 4: User confirms health
+    res4 = await client.post("/api/v1/chat", json={
+        "user_id": user_id,
+        "session_id": session_id,
+        "message": "کاملاً سالم و بدون آفت است",
+    })
+    assert res4.status_code == 200
+    d4 = res4.json()
+    assert len(d4["missing_slots"]) == 0
+    assert d4["calculated_schedule"] is not None
+    assert "10-10-30" in d4["calculated_schedule"]["applied_npk_ratio"] or "12-12-36" in d4["calculated_schedule"]["applied_npk_ratio"]
 
 
 

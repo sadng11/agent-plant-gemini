@@ -152,7 +152,10 @@ class PlantDiagnosticGraph:
                         state["resolved_phase_id"] = plant.current_phase
                     if state.get("health_status") in [None, "UNKNOWN"]:
                         state["health_status"] = plant.health_status
-                        state["health_confirmed"] = True if plant.health_status in ["HEALTHY", "OPTIMAL"] else False
+                        # Do NOT auto-confirm health for consultation session based on DB default;
+                        # only mark unconfirmed/sick if database explicitly flags pathology.
+                        if plant.health_status in ["SICK_OR_SYMPTOMATIC", "CRITICAL"]:
+                            state["health_confirmed"] = False
             except Exception as exc:
                 logger.warning(f"Error loading baseline plant {plant_id} from DB: {exc}")
 
@@ -466,10 +469,6 @@ class PlantDiagnosticGraph:
                 except Exception as exc:
                     logger.warning(f"Could not load phase {phase_id}: {exc}")
 
-            if health_confirmed is None and (not health_status or health_status == "UNKNOWN"):
-                health_status = "HEALTHY"
-                health_confirmed = True
-
             if trait_confirmed is None:
                 trait_confirmed = bool(trait_ids)
 
@@ -552,7 +551,7 @@ class PlantDiagnosticGraph:
                     "resolved_substrate_id": substrate_id,
                     "resolved_trait_ids": trait_ids,
                     "resolved_phase_id": phase_id or "active_vegetative",
-                    "health_status": new_plant.health_status,
+                    "health_status": health_status or "UNKNOWN",
                     "health_confirmed": health_confirmed,
                     "trait_confirmed": trait_confirmed,
                     "species_data": species_data,
@@ -998,13 +997,14 @@ class PlantDiagnosticGraph:
                 "user_message": state.get("user_message", ""),
             }
             llm_instruction = (
-                f"قبل از تنظیم دوز و تقویم کودی برای {plant_desc}، توضیح دهید که چرا بررسی سلامت ریشه و برگ‌ها ضروری است "
-                "و بپرسید آیا گیاه در حال حاضر کاملاً سالم، دارای رشد و بدون آفت یا زردی است یا خیر."
+                f"قبل از تنظیم دوز و تقویم کودی برای {plant_desc}، با لحن دلسوزانه و صریح علمی توضیح دهید که چرا بررسی سلامت ریشه و برگ‌ها حیاتی است: "
+                "تاکید کنید که اگر گیاه بیمار، آفت‌زده، دارای شوک ریشه یا لکه برگی باشد، مصرف کود نه تنها کمکی نمی‌کند، بلکه به دلیل مسمومیت اسمزی و آسیب به ریشه‌های مویین، شرایط گیاه را به مراتب بدتر و وخیم‌تر می‌کند. "
+                "سپس از کاربر بپرسید آیا گیاه در حال حاضر کاملاً سالم، دارای رشد فعال و بدون هرگونه آفت یا زردی است یا خیر."
             )
             fallback_response = (
-                f"قبل از تنظیم دوز و تقویم کودی برای **{plant_desc}**، لطفاً وضعیت سلامت ریشه و برگ‌ها را مشخص فرمایید:\n\n"
-                f"آیا گیاه شما در حال حاضر **کاملاً سالم، دارای رشد و بدون آفت یا زردی** است؟\n\n"
-                f"*(کوددهی به گیاه بیمار یا آفت‌زده باعث تشدید آسیب به ریشه می‌شود.)*"
+                f"قبل از تنظیم دوز و تقویم کودی برای **{plant_desc}**، بررسی سلامت ریشه و برگ‌ها الزامی است:\n\n"
+                f"⚠️ **هشدار مهم اگرونومی:** اگر گیاه دچار آفت، بیماری، استرس محیطی یا پوسیدگی ریشه باشد، استفاده از کود شیمیایی نه تنها فایده‌ای ندارد، بلکه با ایجاد شوک و سوختگی ریشه‌ها، وضعیت گیاه را به مراتب بدتر می‌کند.\n\n"
+                f"آیا گیاه شما در حال حاضر **کاملاً سالم، سرحال و بدون هرگونه آفت، لکه یا زردی برگ** است؟"
             )
 
         # Branch 9: Healthy Plant + Compatible Substrate (4-Week Precision Schedule)
