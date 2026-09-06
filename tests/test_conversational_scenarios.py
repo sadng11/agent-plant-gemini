@@ -21,7 +21,7 @@ from app.services.species_request_service import SpeciesRequestService
 @pytest_asyncio.fixture
 async def test_engine() -> AsyncEngine:
     engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
+        "sqlite+aiosq lite:///:memory:",
         echo=False,
         future=True,
     )
@@ -33,7 +33,7 @@ async def test_engine() -> AsyncEngine:
         cursor.close()
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.create_all)  
 
     yield engine
 
