@@ -28,6 +28,11 @@ SYNTHESIS_SYSTEM_PROMPT = """
 - تنها و تنها در پیام اول کل گفتگو مجاز به سلام و معرفی خود هستید.
 - در پیام‌های بعدی و ادامه گفتگو، هرگز مجدداً سلام نکنید («سلام! 🌿» ننویسید) و خود را دوباره معرفی نکنید.
 - از شروع پیام با جملات خشک اداری مانند «مشخصات گیاهت رو با موفقیت ثبت کردم» پرهیز کنید؛ در عوض به شکل زنده، پیوسته و دوستانه با عباراتی مثل «بسیار عالی»، «متوجه شدم»، «خیلی خوب» یا مستقیماً با پاسخ و راهنمایی شروع کنید.
+۵. قانون طلایی تخصص‌گرایی بالینی و پرهیز قطعی از کلی‌گویی و توصیه‌های عمومی:
+- شما یک گیاه‌پزشک و اگرونومیست بالینی فوق‌تخصصی هستید؛ اکیداً و تحت هیچ شرایطی از کلی‌گویی، تکرار چک‌لیست‌های قالبی یا بیان موارد نامربوط به مشکل مطرح‌شده پرهیز کنید.
+- هرگونه عارضه‌یابی و نسخه درمانی باید ۱۰۰٪ متناسب با گیاه مورد نظر، عارضه دقیق و داده‌های استخراج‌شده از شناسنامه تخصصی آن گونه در پایگاه دانش باشد.
+- اگر کاربر از پوسیدگی ریشه صحبت می‌کند، پاسخ شما باید منحصراً به پوسیدگی ریشه همان گیاه، بررسی طوقه/ریشه، هرس ریشه‌های فاسد، ضدعفونی ریشه، تعویض بستر با ترکیب سبک مناسب گونه و توقف مطلق کوددهی بپردازد؛ اکیداً نامی از آفت، کنه، صابون حشره‌کش، روغن چریش یا ایزولاسیون گلدان نبرید مگر اینکه کاربر خود صراحتاً وجود آفت را گزارش کرده باشد.
+- اگر مشکل آفت است، منحصراً روی آفات شناسایی‌شده همان گونه تمرکز کنید.
 """.strip()
 
 
@@ -482,6 +487,36 @@ class PlantDiagnosticGraph:
                     trait_ids = trait_ids or (list(plant.traits) if plant.traits else [])
                     phase_id = phase_id or plant.current_phase
 
+                    if plant.health_status and (health_status == "UNKNOWN" or not health_status):
+                        health_status = plant.health_status
+                    if health_status == "HEALTHY" and health_confirmed is None:
+                        health_confirmed = True
+
+                    if species_id and not species_data:
+                        try:
+                            species_data = self.kb.get_species(species_id).model_dump()
+                        except Exception as exc:
+                            logger.warning(f"Could not load species {species_id}: {exc}")
+
+                    if substrate_id and not substrate_data:
+                        try:
+                            substrate_data = self.kb.get_substrate(substrate_id).model_dump()
+                        except Exception as exc:
+                            logger.warning(f"Could not load substrate {substrate_id}: {exc}")
+
+                    if trait_ids and not traits_data:
+                        for t_id in trait_ids:
+                            try:
+                                traits_data.append(self.kb.get_trait(t_id).model_dump())
+                            except Exception as exc:
+                                logger.warning(f"Could not load trait {t_id}: {exc}")
+
+                    if phase_id and not phase_data:
+                        try:
+                            phase_data = self.kb.get_phase(phase_id).model_dump()
+                        except Exception as exc:
+                            logger.warning(f"Could not load phase {phase_id}: {exc}")
+
                     if state.get("resolved_substrate_id") and state["resolved_substrate_id"] != plant.substrate_type:
                         updates["substrate_type"] = state["resolved_substrate_id"]
                     if state.get("resolved_phase_id") and state["resolved_phase_id"] != plant.current_phase:
@@ -830,30 +865,148 @@ class PlantDiagnosticGraph:
 
         # Branch 2: Pathology Triage / Sick Plant with Symptoms (BLOCK FERTILIZER)
         elif health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or user_intent == "DIAGNOSIS_SYMPTOM":
+            user_msg = state.get("user_message", "").lower()
             symptoms_str = "، ".join(reported_symptoms) if reported_symptoms else "علائم تنش زیستی یا آفت"
-            clinical_data_summary = {
-                "situation": "گیاه دارای علائم بیماری یا آفت است.",
-                "plant": plant_desc,
-                "symptoms": symptoms_str,
-                "user_message": state.get("user_message", ""),
-            }
-            llm_instruction = (
-                f"برای گیاه {plant_desc} گزارش تریاژ و آسیب‌شناسی گیاه‌پزشکی ارائه دهید. "
-                f"به دلیل وجود علائم تنش/آفت ({symptoms_str})، تاکید قاطع و دلسوزانه کنید که «توقف کامل کوددهی» الزامی است و علل علمی آن را توضیح دهید. "
-                "سپس اقدامات فوری درمان، ایزولاسیون، کنترل آبیاری و آفت‌کشی را به شکل مرتب و خوانا بیان کنید و بگویید پس از رویش برگ‌های جدید سالم برنامه کودی صادر خواهد شد."
-            )
-            fallback_response = (
-                f"🩺 **گزارش تریاژ و آسیب‌شناسی گیاه‌پزشکی برای {plant_desc}**\n\n"
-                f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
-                f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
-                f"به دلیل وجود علائم تنش/آفت و آسیب‌دیدگی بافت‌های گیاه، **مصرف هرگونه کود شیمیایی تا زمان درمان کامل و احیای ریشه‌ها اکیداً ممنوع است.** "
-                f"(کوددهی به گیاه بیمار باعث سوختگی ریشه‌های مویین، تشدید مسمومیت اسمزی و تغذیه عوامل بیماری‌زا می‌شود).\n\n"
-                f"🛡️ **اقدامات درمانی و اصلاحی فوری:**\n"
-                f"۱. **بررسی دقیق و ایزولاسیون:** پشت و روی برگ‌ها و طوقه را بررسی کرده و در صورت وجود آفت گیاه را از سایر گلدان‌ها جدا کنید.\n"
-                f"۲. **تنظیم آبیاری و زهکش:** آبیاری را تا خشک شدن حداقل ۵۰ تا ۶۰ درصد عمق خاک متوقف کنید و از خروج آب مازاد از زهکش مطمئن شوید.\n"
-                f"۳. **درمان تخصصی:** در صورت مشاهده آفت (کنه/شپشک) از صابون حشره‌کش یا روغن چریش استفاده کرده و در صورت لکه‌های قارچی، برگ‌های آلوده را جدا نمایید.\n\n"
-                f"پس از مهار کامل علائم و آغاز رویش برگ‌های جدید و سالم، برنامه کودی برای گیاه صادر خواهد شد."
-            )
+
+            # 1. Match against species-specific clinical disorders from knowledge base
+            matched_disorders: List[Dict[str, Any]] = []
+            if species_data and isinstance(species_data.get("common_disorders"), dict):
+                for dis_id, dis_info in species_data["common_disorders"].items():
+                    triggers = dis_info.get("symptom_triggers", [])
+                    is_matched = False
+                    for trig in triggers:
+                        trig_lower = trig.lower()
+                        if trig_lower in user_msg:
+                            is_matched = True
+                            break
+                        for sym in reported_symptoms:
+                            if trig_lower in sym.lower() or sym.lower() in trig_lower:
+                                is_matched = True
+                                break
+                        if is_matched:
+                            break
+                    if is_matched:
+                        matched_disorders.append(dis_info)
+
+            if matched_disorders:
+                # Species-Specific Clinical Protocol from Knowledge Base
+                primary_dis = matched_disorders[0]
+                disorder_name = primary_dis.get("persian_name", "عارضه بالینی")
+                scientific_name = primary_dis.get("scientific_name", "")
+                causative_factors = primary_dis.get("causative_factors", "")
+                action_steps = primary_dis.get("clinical_action_steps", [])
+                banned_actions = primary_dis.get("banned_actions", [])
+                remedy = primary_dis.get("recommended_remedy", "")
+                recovery_indicator = primary_dis.get("recovery_indicator", "")
+
+                clinical_data_summary = {
+                    "situation": f"تشخیص بالینی عارضه تخصصی برای {plant_desc}.",
+                    "plant": plant_desc,
+                    "reported_symptoms": reported_symptoms,
+                    "disorder": {
+                        "name": disorder_name,
+                        "scientific_name": scientific_name,
+                        "causative_factors": causative_factors,
+                        "clinical_action_steps": action_steps,
+                        "banned_actions": banned_actions,
+                        "recommended_remedy": remedy,
+                        "recovery_indicator": recovery_indicator,
+                    },
+                    "user_message": state.get("user_message", ""),
+                }
+
+                llm_instruction = (
+                    f"گزارش تخصصی گیاه‌پزشکی بالینی برای عارضه «{disorder_name}» در گیاه {plant_desc} صادر کنید. "
+                    f"دستورالعمل اکید اگرونومی: ۱۰۰٪ بر مبنای پروتکل فایل مرجع برای این عارضه پاسخ دهید. "
+                    f"علت بیولوژیکی ({causative_factors}) را با بیانی علمی و صمیمی شرح دهید. "
+                    f"توقف قطعی کوددهی شیمیایی ({'، '.join(banned_actions)}) را اعلام کرده و دلایل مسمومیت اسمزی و آسیب ریشه‌های مویین را توضیح دهید. "
+                    f"مراحل بالینی درمانی ({'، '.join(action_steps)}) را به صورت گام‌های مرتب و شماره‌گذاری‌شده بنویسید. "
+                    f"{f'ترکیب درمانی تجویزی ({remedy}) را ذکر کنید. ' if remedy else ''}"
+                    f"شاخص بهبود بالینی ({recovery_indicator}) را یادآوری کرده و تاکید کنید پس از التیام، نسخه کودی تنظیم خواهد شد. "
+                    f"اکیداً از کلی‌گویی و ذکر موارد نامربوط (مانند راهکارهای آفت‌کشی یا صابون در صورتی که مشکل بیماری ریشه/قارچ است) خودداری کنید."
+                )
+
+                steps_formatted = "\n".join([f"{i+1}. {step}" for i, step in enumerate(action_steps)])
+                banned_formatted = "\n".join([f"- {b}" for b in banned_actions]) if banned_actions else "- مصرف هرگونه کود شیمیایی تا بهبود کامل اکیداً ممنوع است."
+                pathogen_str = f" (`{scientific_name}`)" if scientific_name else ""
+                remedy_block = f"\n💊 **ترکیب درمانی تجویزی:**\n- {remedy}\n" if remedy else ""
+
+                fallback_response = (
+                    f"🩺 **گزارش تخصصی گیاه‌پزشکی بالینی برای {plant_desc}**\n\n"
+                    f"🔍 **تشخیص بالینی:** {disorder_name}{pathogen_str}\n\n"
+                    f"🧬 **علت بیولوژیکی در {plant_desc}:**\n"
+                    f"{causative_factors}\n\n"
+                    f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
+                    f"به دلیل آسیب به بافت‌ها و ریشه‌های مویین، مصرف کود شیمیایی اکیداً ممنوع است:\n"
+                    f"{banned_formatted}\n\n"
+                    f"🛡️ **پروتکل درمانی و اقدامات بالینی گام‌به‌گام:**\n"
+                    f"{steps_formatted}\n"
+                    f"{remedy_block}\n"
+                    f"🌱 **شاخص بهبود بالینی:**\n"
+                    f"{recovery_indicator}\n\n"
+                    f"پس از مشاهده شاخص‌های بهبود و رویش بافت‌های جدید و سالم، برنامه کودی برای گیاه صادر خواهد شد."
+                )
+            else:
+                # Dynamic targeted fallback based strictly on reported symptoms
+                is_root_issue = any(w in symptoms_str for w in ["پوسیدگی", "شل", "سیاه", "ریشه"]) or any(w in user_msg for w in ["پوسیدگی", "ریشه", "شل شدن"])
+                is_pest_issue = any(w in symptoms_str for w in ["آفت", "کنه", "شپشک", "پشه"]) or any(w in user_msg for w in ["آفت", "کنه", "شپشک", "پشه"])
+
+                clinical_data_summary = {
+                    "situation": f"گیاه {plant_desc} دارای علائم تنش ({symptoms_str}) است.",
+                    "plant": plant_desc,
+                    "symptoms": symptoms_str,
+                    "user_message": state.get("user_message", ""),
+                }
+
+                if is_root_issue and not is_pest_issue:
+                    llm_instruction = (
+                        f"برای گیاه {plant_desc} با علائم پوسیدگی ریشه و آسیب بافتی، راهنمای درمان بالینی ریشه صادر کنید. "
+                        f"تاکید قاطع بر «توقف کامل کوددهی» داشته باشید و اقدامات بازبینی ریشه، هرس ریشه‌های پوسیده، ضدعفونی با قارچ‌کش و تعویض خاک به بستر با زهکش بالا را توضیح دهید. "
+                        f"اکیداً درباره آفت‌کشی یا صابون‌های روغنی صحبت نکنید."
+                    )
+                    fallback_response = (
+                        f"🩺 **گزارش تریاژ و آسیب‌شناسی بالینی برای {plant_desc}**\n\n"
+                        f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
+                        f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
+                        f"به دلیل آسیب به بافت ریشه‌ها، مصرف هرگونه کود شیمیایی اکیداً ممنوع است. کوددهی باعث سوختگی اسمزی ریشه‌های مویین و تسریع زوال گیاه می‌شود.\n\n"
+                        f"🛡️ **اقدامات بالینی فوری ریشه:**\n"
+                        f"۱. **بررسی و هرس ریشه‌ها:** گیاه را با احتیاط از گلدان خارج کرده و ریشه‌های قهوه‌ای، نرم و پوسیده را با قیچی استریل تا رسیدن به بافت سفید قطع کنید.\n"
+                        f"۲. **ضدعفونی ریشه:** ریشه‌ها را در محلول قارچ‌کش حفاظتی (مانند کاربندازیم) یا آب‌اکسیژنه رقیق شستشو دهید.\n"
+                        f"۳. **کاشت در بستر سبک:** گیاه را در خاکی با زهکشی بسیار بالا و دارای پرلیت و پوسته متخلخل بکارید و تا چند روز آبیاری را متوقف نمایید.\n\n"
+                        f"پس از تثبیت وضعیت و رویش ریشه‌های سفید جدید، برنامه کودی صادر خواهد شد."
+                    )
+                elif is_pest_issue and not is_root_issue:
+                    llm_instruction = (
+                        f"برای گیاه {plant_desc} با علائم آفت و حشرات، راهنمای مبارزه با آفت صادر کنید. "
+                        f"بر ایزولاسیون گلدان، پاکسازی برگ‌ها و مصرف صابون حشره‌کش بیولوژیک یا کنه‌کش تخصصی تاکید کنید و مصرف کودهای ازته را متوقف نمایید."
+                    )
+                    fallback_response = (
+                        f"🩺 **گزارش تریاژ و آسیب‌شناسی بالینی برای {plant_desc}**\n\n"
+                        f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
+                        f"⛔ **دستور اکید گیاه‌پزشکی:**\n"
+                        f"مصرف هرگونه کود شیمیایی (به‌ویژه ازت بالا) تا مهار قطعی آفات متوقف می‌شود، زیرا نیتروژن بافت برگ را آبدار و جمعیت آفات را تشدید می‌کند.\n\n"
+                        f"🛡️ **اقدامات فوری مهار آفت:**\n"
+                        f"۱. **ایزولاسیون گلدان:** گیاه را از سایر گلدان‌ها جدا کنید تا از سرایت آفت جلوگیری شود.\n"
+                        f"۲. **پاکسازی شاخسار:** برگ‌ها و طوقه را با دستمال مرطوب یا پنبه آغشته به محلول ملایم تمیز کنید.\n"
+                        f"۳. **مبارزه تخصصی:** از صابون حشره‌کش بیولوژیک (پالیزین) یا روغن چریش در هوای خنک استفاده فرمایید.\n\n"
+                        f"پس از مهار کامل علائم، برنامه کودی صادر خواهد شد."
+                    )
+                else:
+                    llm_instruction = (
+                        f"برای گیاه {plant_desc} با علائم ({symptoms_str}) گزارش گیاه‌پزشکی ارائه دهید. "
+                        f"بر توقف کوددهی تاکید کرده و اقدامات متناسب با همان علائم را شرح دهید. از کلی‌گویی و بیان سرفصل‌های نامربوط پرهیز کنید."
+                    )
+                    fallback_response = (
+                        f"🩺 **گزارش تریاژ و آسیب‌شناسی بالینی برای {plant_desc}**\n\n"
+                        f"🔍 **علائم شناسایی‌شده:** {symptoms_str}\n\n"
+                        f"⛔ **دستور اکید گیاه‌پزشکی (توقف کامل کوددهی):**\n"
+                        f"به دلیل وجود علائم تنش فیزیولوژیکی و آسیب بافت‌ها، مصرف هرگونه کود شیمیایی تا زمان درمان کامل اکیداً ممنوع است.\n\n"
+                        f"🛡️ **اقدامات درمانی و اصلاحی:**\n"
+                        f"۱. بررسی دقیق ناحیه طوقه، ریشه و برگ‌ها جهت شناسایی منشأ تنش.\n"
+                        f"۲. تنظیم فواصل آبیاری متناسب با رطوبت عمق خاک و اطمینان از خروج کامل آب از زهکش.\n"
+                        f"۳. پرهیز از تغییر ناگهانی نور و دما تا زمان ریکاوری گیاه.\n\n"
+                        f"پس از آغاز رویش بافت‌های جدید و سالم، برنامه کودی صادر خواهد شد."
+                    )
 
         # Branch 3: Missing Substrate (Gate 1b)
         elif "substrate" in missing_slots or not substrate_data:

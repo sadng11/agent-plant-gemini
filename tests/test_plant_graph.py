@@ -204,7 +204,7 @@ async def test_graph_with_digital_twin_sync(
         "user_id": "user_twin_1",
         "session_id": "sess_5",
         "plant_id": str(plant.id),
-        "user_message": "برنامه آبیاری و کودی این ماهم چیه؟",
+        "user_message": "گیاهم کاملاً سالمه، برنامه آبیاری و کودی این ماهم چیه؟",
     }
 
     final_state = await graph.ainvoke(initial_state)
@@ -389,6 +389,46 @@ async def test_graph_pathology_triage_blocks_fertilizer(kb_manager: KnowledgeBas
     assert any(w in response for w in ["تریاژ", "آسیب‌شناسی", "بیماری", "آفت", "تنش"])
     assert any(w in response for w in ["توقف", "ممنوع", "کوددهی", "کود"])
     assert any(w in response for w in ["کنه", "آفت", "ایزولاسیون", "درمان"])
+
+
+@pytest.mark.asyncio
+async def test_monstera_root_rot_specific_clinical_guidance_no_pests(kb_manager: KnowledgeBaseManager):
+    """
+    Test that when user reports root rot on Monstera:
+    1. It matches the Monstera root rot disorder from knowledge base.
+    2. Fertilizer is strictly blocked.
+    3. Clinical actions include root inspection, pruning, fungicide, Aroid mix.
+    4. DOES NOT contain irrelevant generic advice like pest isolation, insecticidal soap, or neem oil.
+    """
+    graph = create_plant_care_graph(kb_manager=kb_manager)
+
+    root_rot_state: PlantCareState = {
+        "user_id": "u_root_rot_test",
+        "session_id": "sess_rr_1",
+        "user_message": "آره گیاه من پوسیدگی ریشه داره و برگ ها دارن قهوه ای میشن",
+        "resolved_species_id": "monstera_deliciosa",
+        "species_data": kb_manager.get_species("monstera_deliciosa").model_dump(),
+    }
+
+    state = await graph.ainvoke(root_rot_state)
+
+    assert state.get("calculated_schedule") is None
+    assert state.get("risk_level") == "CRITICAL_BLOCKER"
+    assert state.get("risk_type") == "PATHOLOGY"
+    response = state.get("final_response", "")
+
+    # Must contain root rot specific clinical remediation
+    assert any(w in response for w in ["پوسیدگی", "ریشه"])
+    assert any(w in response for w in ["هرس", "بافت", "قطع"])
+    assert any(w in response for w in ["Aroid Mix", "بستر", "زهکش", "متخلخل"])
+    assert any(w in response for w in ["توقف", "ممنوع", "کود"])
+
+    # Must NOT contain irrelevant pest boilerplate
+    assert "کنه" not in response
+    assert "شپشک" not in response
+    assert "روغن چریش" not in response
+    assert "صابون حشره‌کش" not in response
+    assert "ایزولاسیون" not in response
 
 
 @pytest.mark.asyncio

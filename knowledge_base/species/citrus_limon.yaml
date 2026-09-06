@@ -55,3 +55,66 @@ phenology_constraints:
     advisory_strategy:
       action: "check_photoperiod_and_dormancy"
       warning: "گل‌انگیزی در لیمو ترش نیازمند دوره سرمای ملایم زمستانه (استراحت دمایی ۱۰ تا ۱۵ درجه) و نور شدید است؛ افزایش کود فسفر بالا به تنهایی محرک گل‌دهی نخواهد بود."
+
+common_disorders:
+  root_and_collar_rot:
+    disorder_id: "root_and_collar_rot"
+    persian_name: "پوسیدگی طوقه و ریشه لیمو ترش (گموز فیتوفتورایی)"
+    scientific_name: "Phytophthora citrophthora / Phytophthora nicotianae"
+    symptom_triggers:
+      - "پوسیدگی"
+      - "پوسیدگی ریشه یا طوقه (Root Rot)"
+      - "صمغ"
+      - "شل"
+      - "سیاه"
+    causative_factors: "تماس مداوم آب با پوست طوقه، سنگینی و غرقابی خاک رسی و زهکشی نامناسب کف گلدان."
+    clinical_action_steps:
+      - "کنار زدن خاک اطراف طوقه تا محل شروع ریشه‌های اصلی جهت هوا خوردن و خشک شدن تنه."
+      - "تراشیدن بافت‌های قهوه‌ای و پوسیده تنه تا رسیدن به بافت سبز و زنده گیاه با کارد استریل."
+      - "پانسمان محل زخم طوقه با خمیر بردوفیکس غلیظ یا اکسی‌کلرور مس."
+      - "آبیاری پای بوته با قارچ‌کش متالاکسیل یا فوزتیل آلومینیوم (الیِت) با دوز استاندارد گیاه‌پزشکی."
+      - "اصلاح زهکش و عدم تماس مستقیم آب آبیاری با طوقه در آینده."
+    banned_actions:
+      - "مصرف هرگونه کود شیمیایی پایه به خصوص کودهای نیتروژنه تا زمان التیام کامل زخم‌ها."
+      - "غرقاب کردن مجدد خاک یا تماس شلنگ آب با تنه درخت."
+    repotting_required: false
+    recommended_remedy: "بردوفیکس / قارچ‌کش فوزتیل آلومینیوم (Aliette) یا متالاکسیل"
+    recovery_indicator: "خشک شدن شیره و ترشحات صمغی، بسته شدن پوست طوقه و سبز ماندن شاخسار."
+
+  iron_deficiency_chlorosis:
+    disorder_id: "iron_deficiency_chlorosis"
+    persian_name: "کلروز کمبود آهن مرکبات"
+    scientific_name: "Iron Deficiency Chlorosis (Lime-induced)"
+    symptom_triggers:
+      - "زرد"
+      - "زردی برگ (Chlorosis)"
+    causative_factors: "قلیایی بودن خاک، آبیاری با آب سنگین حاوی بیکربنات و عدم جذب عنصر آهن در ریشه‌های مرکبات."
+    clinical_action_steps:
+      - "استفاده از کود آهن کلاته با کیفیت بر پایه EDDHA به صورت مصرف خاکی همراه با آب آبیاری."
+      - "تنظیم pH آب آبیاری با مقادیر بسیار اندک اسید هیومیک یا اسید سیتریک خوراکی."
+      - "بررسی خروج املاح مازاد با شستشوی دوره‌ای خاک."
+    banned_actions:
+      - "مصرف کودهای با فسفر بسیار بالا (فسفر اضافه مانع جذب ریشه‌ای آهن می‌شود)."
+    repotting_required: false
+    recommended_remedy: "کلات آهن Fe-EDDHA با درصد اورتو-اورتو بالا (مانند سکوسترین)"
+    recovery_indicator: "سبز شدن تدریجی پهنک برگ‌های جوان بین رگبرگ‌ها."
+
+  citrus_leafminer_and_scale:
+    disorder_id: "citrus_leafminer_and_scale"
+    persian_name: "مینوز و شپشک‌های مرکبات"
+    scientific_name: "Phyllocnistis citrella / Diaspididae"
+    symptom_triggers:
+      - "آفت"
+      - "مشاهده آفت و حشرات مضر"
+      - "کنه"
+      - "شپشک"
+    causative_factors: "فعالیت لاروهای پروانه مینوز روی برگ‌های جوان بهاره/تابستانه مرکبات و تهویه ناکافی."
+    clinical_action_steps:
+      - "هرس سرشاخه‌های شدیداً پیچیده و آلوده به دالان‌های مینوز."
+      - "محلول‌پاشی صابون آفت‌کش روغنی یا حشره‌کش سمپاشی ملایم (مانند آبامکتین یا کنفیدور) در ساعات بدون آفتاب."
+      - "حفاظت از برگ‌های جوان در برابر باد و هوای راکد آلوده."
+    banned_actions:
+      - "سمپاشی در ساعات گرم آفتابی که باعث سوختگی بافت روغنی برگ‌های مرکبات می‌شود."
+    repotting_required: false
+    recommended_remedy: "حشره‌کش آبامکتین همراه با روغن ولک رقیق / صابون پتاسیمی"
+    recovery_indicator: "رویش جست‌های جدید صاف، پهن و بدون دالان‌های مارپیچی."

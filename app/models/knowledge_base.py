@@ -214,6 +214,32 @@ class PhenologyConstraintModel(BaseModel):
     advisory_strategy: Optional[AdvisoryStrategyModel] = None
 
 
+class DisorderProtocolModel(BaseModel):
+    """Species-specific clinical disorder and pathology remediation protocol."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    disorder_id: str = Field(..., description="Unique disorder key e.g. 'root_rot'")
+    persian_name: str = Field(..., description="Name of disorder in Persian")
+    scientific_name: Optional[str] = Field(default=None, description="Scientific or pathogen name")
+    symptom_triggers: List[str] = Field(
+        default_factory=list,
+        description="Trigger keywords/symptoms that match this disorder",
+    )
+    causative_factors: str = Field(..., description="Biological and environmental causes for this species")
+    clinical_action_steps: List[str] = Field(
+        default_factory=list,
+        description="Sequential, species-specific clinical remediation steps",
+    )
+    banned_actions: List[str] = Field(
+        default_factory=list,
+        description="Actions strictly prohibited (e.g. fertilizer, waterlogging)",
+    )
+    repotting_required: bool = Field(default=False, description="Whether root inspection/repotting is required")
+    recommended_remedy: Optional[str] = Field(default=None, description="Recommended treatment or active agent")
+    recovery_indicator: str = Field(..., description="Signs indicating recovery has occurred")
+
+
 # ============================================================================
 # Species Root Model
 # ============================================================================
@@ -232,6 +258,10 @@ class SpeciesModel(BaseModel):
     phenology_constraints: Dict[str, PhenologyConstraintModel] = Field(
         default_factory=dict,
         description="Phenology constraints mapped by phase/goal e.g. 'fruiting_and_flowering'",
+    )
+    common_disorders: Dict[str, DisorderProtocolModel] = Field(
+        default_factory=dict,
+        description="Species-specific clinical disorders and remediation protocols",
     )
 
 

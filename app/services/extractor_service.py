@@ -239,36 +239,30 @@ class EntityExtractorService:
         """
         if self.client and self.api_key:
             try:
-                async for attempt in AsyncRetrying(
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=1, max=4),
-                    reraise=True,
-                ):
-                    with attempt:
-                        coro = self.client.beta.chat.completions.parse(
-                            model=self.model_name,
-                            messages=[
-                                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                                {"role": "user", "content": message},
-                            ],
-                            response_format=ExtractedPlantEntities,
-                            temperature=0.0,
-                        )
-                        response = await asyncio.wait_for(coro, timeout=30.0)
-                        parsed = response.choices[0].message.parsed
-                        if parsed is not None:
-                            if parsed.species_query:
-                                is_supported = bool(self.resolve_species_id(parsed.species_query))
-                                if not is_supported:
-                                    parsed.unsupported_species = parsed.species_query
-                                    if "species" in parsed.missing_critical_info:
-                                        parsed.missing_critical_info = [
-                                            s for s in parsed.missing_critical_info if s != "species"
-                                        ]
-                            return parsed
+                coro = self.client.beta.chat.completions.parse(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": message},
+                    ],
+                    response_format=ExtractedPlantEntities,
+                    temperature=0.0,
+                )
+                response = await asyncio.wait_for(coro, timeout=8.0)
+                parsed = response.choices[0].message.parsed
+                if parsed is not None:
+                    if parsed.species_query:
+                        is_supported = bool(self.resolve_species_id(parsed.species_query))
+                        if not is_supported:
+                            parsed.unsupported_species = parsed.species_query
+                            if "species" in parsed.missing_critical_info:
+                                parsed.missing_critical_info = [
+                                    s for s in parsed.missing_critical_info if s != "species"
+                                ]
+                    return parsed
             except Exception as exc:
-                logger.warning(
-                    f"OpenAI structured output failed after retries: {exc}. Falling back to rule-based extraction."
+                logger.debug(
+                    f"LLM structured output extraction bypassed ({exc}). Using deterministic botanical extractor."
                 )
 
         return self._rule_based_extract(message)
