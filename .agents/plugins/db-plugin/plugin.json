@@ -1,0 +1,5 @@
+{
+  "name": "db-plugin",
+  "version": "1.0.0",
+  "description": "PostgreSQL database integration via MCP for tg_runner"
+}
