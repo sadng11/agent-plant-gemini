@@ -19,6 +19,7 @@ from app.models.api_schemas import (
 from app.services.chat_history_service import ChatHistoryService
 from app.services.digital_twin_service import DigitalTwinService
 from app.services.extractor_service import EntityExtractorService
+from app.services.species_request_service import SpeciesRequestService
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ async def chat_diagnostic_stream(
     """
     chat_service = ChatHistoryService(session=db)
     dt_service = DigitalTwinService(session=db)
+    species_req_service = SpeciesRequestService(session=db)
 
     # 1. Get or create persistent ChatSession
     session_obj = await chat_service.get_or_create_session(
@@ -50,6 +52,7 @@ async def chat_diagnostic_stream(
 
     # Reconstruct previous state from session messages history if available
     prev_species_id: Optional[str] = None
+    prev_unsupported_species: Optional[str] = None
     prev_substrate_id: Optional[str] = None
     prev_trait_ids: List[str] = []
     prev_phase_id: Optional[str] = None
@@ -65,6 +68,8 @@ async def chat_diagnostic_stream(
         if m.sender == "agent" and m.payload:
             if m.payload.get("resolved_species_id"):
                 prev_species_id = m.payload["resolved_species_id"]
+            if m.payload.get("unsupported_species"):
+                prev_unsupported_species = m.payload["unsupported_species"]
             if m.payload.get("resolved_substrate_id"):
                 prev_substrate_id = m.payload["resolved_substrate_id"]
             if "resolved_trait_ids" in m.payload:
@@ -101,6 +106,7 @@ async def chat_diagnostic_stream(
         "user_message": req.message,
         "plant_id": active_plant_id,
         "resolved_species_id": prev_species_id,
+        "unsupported_species": prev_unsupported_species,
         "resolved_substrate_id": prev_substrate_id,
         "resolved_trait_ids": prev_trait_ids,
         "resolved_phase_id": prev_phase_id,
@@ -117,6 +123,7 @@ async def chat_diagnostic_stream(
         kb_manager=default_kb_manager,
         extractor=EntityExtractorService(),
         digital_twin_service=dt_service,
+        species_request_service=species_req_service,
     )
 
     async def event_generator():
@@ -162,6 +169,7 @@ async def chat_diagnostic_stream(
                 "missing_slots": final_state.get("missing_slots", []),
                 "extracted_entities": final_state.get("extracted_entities"),
                 "resolved_species_id": final_state.get("resolved_species_id"),
+                "unsupported_species": final_state.get("unsupported_species"),
                 "resolved_substrate_id": final_state.get("resolved_substrate_id"),
                 "resolved_trait_ids": final_state.get("resolved_trait_ids", []),
                 "resolved_phase_id": final_state.get("resolved_phase_id"),
@@ -225,6 +233,7 @@ async def chat_diagnostic(
     """
     chat_service = ChatHistoryService(session=db)
     dt_service = DigitalTwinService(session=db)
+    species_req_service = SpeciesRequestService(session=db)
 
     # 1. Get or create persistent ChatSession
     session_obj = await chat_service.get_or_create_session(
@@ -237,6 +246,7 @@ async def chat_diagnostic(
 
     # Reconstruct previous state from session messages history if available
     prev_species_id: Optional[str] = None
+    prev_unsupported_species: Optional[str] = None
     prev_substrate_id: Optional[str] = None
     prev_trait_ids: List[str] = []
     prev_phase_id: Optional[str] = None
@@ -252,6 +262,8 @@ async def chat_diagnostic(
         if m.sender == "agent" and m.payload:
             if m.payload.get("resolved_species_id"):
                 prev_species_id = m.payload["resolved_species_id"]
+            if m.payload.get("unsupported_species"):
+                prev_unsupported_species = m.payload["unsupported_species"]
             if m.payload.get("resolved_substrate_id"):
                 prev_substrate_id = m.payload["resolved_substrate_id"]
             if "resolved_trait_ids" in m.payload:
@@ -286,6 +298,7 @@ async def chat_diagnostic(
         kb_manager=default_kb_manager,
         extractor=EntityExtractorService(),
         digital_twin_service=dt_service,
+        species_request_service=species_req_service,
     )
 
     initial_state: PlantCareState = {
@@ -294,6 +307,7 @@ async def chat_diagnostic(
         "user_message": req.message,
         "plant_id": req.plant_id or (str(session_obj.plant_id) if session_obj.plant_id else None),
         "resolved_species_id": prev_species_id,
+        "unsupported_species": prev_unsupported_species,
         "resolved_substrate_id": prev_substrate_id,
         "resolved_trait_ids": prev_trait_ids,
         "resolved_phase_id": prev_phase_id,
@@ -327,6 +341,7 @@ async def chat_diagnostic(
         "missing_slots": final_state.get("missing_slots", []),
         "extracted_entities": final_state.get("extracted_entities"),
         "resolved_species_id": final_state.get("resolved_species_id"),
+        "unsupported_species": final_state.get("unsupported_species"),
         "resolved_substrate_id": final_state.get("resolved_substrate_id"),
         "resolved_trait_ids": final_state.get("resolved_trait_ids", []),
         "resolved_phase_id": final_state.get("resolved_phase_id"),

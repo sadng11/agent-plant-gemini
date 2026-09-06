@@ -41,3 +41,16 @@ export interface PhaseSummaryResponse {
   override_npk_ratio?: string | null;
   mandatory_supplements: MandatorySupplement[];
 }
+
+export interface UnsupportedSpeciesResponse {
+  id: string;
+  user_id: string;
+  session_id?: string | null;
+  raw_query: string;
+  normalized_name: string;
+  user_message?: string | null;
+  status: string;
+  request_count: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}

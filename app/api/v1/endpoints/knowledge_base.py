@@ -1,13 +1,17 @@
-from typing import Any, Dict, List
-from fastapi import APIRouter, HTTPException, status
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_db
 from app.core.kb_loader import default_kb_manager
 from app.models.api_schemas import (
     PhaseSummaryResponse,
     SpeciesSummaryResponse,
     SubstrateSummaryResponse,
     TraitSummaryResponse,
+    UnsupportedSpeciesResponse,
 )
+from app.services.species_request_service import SpeciesRequestService
 
 router = APIRouter()
 
@@ -112,3 +116,41 @@ async def list_phases() -> List[PhaseSummaryResponse]:
             )
         )
     return summaries
+
+
+@router.get(
+    "/unsupported-species",
+    response_model=List[UnsupportedSpeciesResponse],
+    summary="List all plant species requested by users not yet in Knowledge Base",
+)
+async def list_unsupported_species(
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status (PENDING, IN_PROGRESS, RESOLVED)"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> List[UnsupportedSpeciesResponse]:
+    """
+    Returns aggregated requests for unsupported plant species mentioned by users,
+    ordered by request frequency and recent activity.
+    """
+    service = SpeciesRequestService(session=db)
+    records = await service.get_unsupported_species_requests(
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return [
+        UnsupportedSpeciesResponse(
+            id=str(r.id),
+            user_id=r.user_id,
+            session_id=str(r.session_id) if r.session_id else None,
+            raw_query=r.raw_query,
+            normalized_name=r.normalized_name,
+            user_message=r.user_message,
+            status=r.status,
+            request_count=r.request_count,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+            updated_at=r.updated_at.isoformat() if r.updated_at else None,
+        )
+        for r in records
+    ]

@@ -13,8 +13,15 @@ from app.models.api_schemas import (
     SpeciesSummaryResponse,
     SubstrateSummaryResponse,
     TraitSummaryResponse,
+    UnsupportedSpeciesResponse,
 )
-from app.models.db_models import PlantEventLog, UserPlant
+from app.models.db_models import (
+    ChatMessage,
+    ChatSession,
+    PlantEventLog,
+    UnsupportedSpeciesRequest,
+    UserPlant,
+)
 from app.models.knowledge_base import (
     BaseFeedingModel,
     BotanicalInfoModel,
@@ -54,12 +61,16 @@ __all__ = [
     "SubstrateSummaryResponse",
     "TraitSummaryResponse",
     "PhaseSummaryResponse",
+    "UnsupportedSpeciesResponse",
     # Agent State Models
     "ExtractedPlantEntities",
     "PlantCareState",
     # DB Models
     "UserPlant",
     "PlantEventLog",
+    "ChatSession",
+    "ChatMessage",
+    "UnsupportedSpeciesRequest",
     # Knowledge Base Models
     "CompatibilityStatus",
     "SupplementModel",

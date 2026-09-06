@@ -529,6 +529,44 @@ async def test_chat_stream_persists_session_and_messages(client: AsyncClient):
     assert msgs[1]["payload"]["risk_level"] == "CRITICAL_BLOCKER"
 
 
+@pytest.mark.asyncio
+async def test_list_unsupported_species_endpoint(client: AsyncClient):
+    """Test GET /api/v1/kb/unsupported-species returns registered user requested plants."""
+    # 1. Send chat mentioning pothos
+    payload = {
+        "user_id": "user_pothos_api",
+        "message": "من یک گیاه پتوس دارم",
+    }
+    res_chat = await client.post("/api/v1/chat", json=payload)
+    assert res_chat.status_code == 200
+    chat_data = res_chat.json()
+    assert chat_data["missing_slots"] == []
+    assert "پتوس" in chat_data["response"]
+    assert "نام یا گونه گیاه شما چیست؟" not in chat_data["response"]
+    assert "در چه نوع خاکی کاشته شده است" not in chat_data["response"]
+
+    # 2. Send follow-up in same session with soil
+    res_chat2 = await client.post("/api/v1/chat", json={
+        "user_id": "user_pothos_api",
+        "session_id": chat_data["session_id"],
+        "message": "کوکوپیت و پرلیت",
+    })
+    assert res_chat2.status_code == 200
+    chat2_data = res_chat2.json()
+    assert chat2_data["missing_slots"] == []
+    assert "در چه نوع خاکی کاشته شده است" not in chat2_data["response"]
+    assert "ثبت نشده" in chat2_data["response"]
+
+    # 3. Query unsupported-species endpoint
+    res_unsupp = await client.get("/api/v1/kb/unsupported-species")
+    assert res_unsupp.status_code == 200
+    records = res_unsupp.json()
+    assert len(records) >= 1
+    pothos_rec = next(r for r in records if "پتوس" in r["normalized_name"] or "پتوس" in r["raw_query"])
+    assert pothos_rec["request_count"] == 1
+    assert pothos_rec["status"] == "PENDING"
+
+
 
 
 

@@ -331,6 +331,88 @@ class ChatMessage(Base):
         )
 
 
+
+class UnsupportedSpeciesRequest(Base):
+    """
+    SQLAlchemy ORM Model representing user-mentioned plant species
+    that are not currently available in the Knowledge Base (YAML repository),
+    allowing agronomy teams to prioritize creating new knowledge base files.
+    """
+    __tablename__ = "unsupported_species_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+        nullable=False,
+    )
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        index=True,
+        nullable=True,
+    )
+    raw_query: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+    normalized_name: Mapped[str] = mapped_column(
+        String(100),
+        index=True,
+        nullable=False,
+    )
+    user_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="PENDING",
+        nullable=False,
+    )
+    request_count: Mapped[int] = mapped_column(
+        default=1,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert model instance to dictionary representation."""
+        return {
+            "id": str(self.id),
+            "user_id": self.user_id,
+            "session_id": str(self.session_id) if self.session_id else None,
+            "raw_query": self.raw_query,
+            "normalized_name": self.normalized_name,
+            "user_message": self.user_message,
+            "status": self.status,
+            "request_count": self.request_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<UnsupportedSpeciesRequest(id={self.id}, normalized_name='{self.normalized_name}', "
+            f"count={self.request_count}, status='{self.status}')>"
+        )
+
+
 # Indices for fast queries
 Index("idx_user_plants_user", UserPlant.user_id)
 Index("idx_plant_events_plant", PlantEventLog.plant_id)
@@ -338,4 +420,5 @@ Index("idx_chat_sessions_user", ChatSession.user_id)
 Index("idx_chat_sessions_plant", ChatSession.plant_id)
 Index("idx_chat_messages_session", ChatMessage.session_id)
 Index("idx_chat_messages_created", ChatMessage.created_at)
+Index("idx_unsupported_species_norm", UnsupportedSpeciesRequest.normalized_name)
 

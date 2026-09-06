@@ -68,6 +68,79 @@ class EntityExtractorService:
         "مرکبات": "citrus_limon",
     }
 
+    # Common popular indoor/outdoor plants not yet in KB YAML database
+    POPULAR_UNSUPPORTED_SPECIES: Dict[str, str] = {
+        "پتوس": "پتوس (Pothos)",
+        "پوتوس": "پتوس (Pothos)",
+        "pothos": "پتوس (Pothos)",
+        "سانسوریا": "سانسوریا (Sansevieria)",
+        "شمشیری": "سانسوریا (Sansevieria)",
+        "sansevieria": "سانسوریا (Sansevieria)",
+        "زاموفیلیا": "زاموفیلیا (ZZ Plant)",
+        "زامفولیا": "زاموفیلیا (ZZ Plant)",
+        "zz plant": "زاموفیلیا (ZZ Plant)",
+        "شفلرا": "شفلرا (Schefflera)",
+        "schefflera": "شفلرا (Schefflera)",
+        "فیکوس": "فیکوس (Ficus)",
+        "فیکوس الاستیکا": "فیکوس الاستیکا (Ficus elastica)",
+        "بنجامین": "فیکوس بنجامین (Ficus benjamina)",
+        "فیکوس لیراتا": "فیکوس لیراتا (Ficus lyrata)",
+        "لیراتا": "فیکوس لیراتا (Ficus lyrata)",
+        "آگلونما": "آگلونما (Aglaonema)",
+        "اگلونما": "آگلونما (Aglaonema)",
+        "aglaonema": "آگلونما (Aglaonema)",
+        "اسپاتی فیلوم": "اسپاتی‌فیلوم (Spathiphyllum)",
+        "اسپاتی‌فیلوم": "اسپاتی‌فیلوم (Spathiphyllum)",
+        "اسپاتی": "اسپاتی‌فیلوم (Spathiphyllum)",
+        "spathiphyllum": "اسپاتی‌فیلوم (Spathiphyllum)",
+        "دیفن باخیا": "دیفن‌باخیا (Dieffenbachia)",
+        "دیفن‌باخیا": "دیفن‌باخیا (Dieffenbachia)",
+        "دیفن": "دیفن‌باخیا (Dieffenbachia)",
+        "dieffenbachia": "دیفن‌باخیا (Dieffenbachia)",
+        "یوکا": "یوکا (Yucca)",
+        "yucca": "یوکا (Yucca)",
+        "کروتون": "کروتون (Croton)",
+        "croton": "کروتون (Croton)",
+        "برگ بیدی": "برگ‌بیدی (Tradescantia)",
+        "برگ‌بیدی": "برگ‌بیدی (Tradescantia)",
+        "tradescantia": "برگ‌بیدی (Tradescantia)",
+        "ارکیده": "ارکیده (Orchid)",
+        "orchid": "ارکیده (Orchid)",
+        "سینگونیوم": "سینگونیوم (Syngonium)",
+        "syngonium": "سینگونیوم (Syngonium)",
+        "پاپیتال": "پاپیتال (English Ivy)",
+        "عشقه": "پاپیتال (English Ivy)",
+        "ivy": "پاپیتال (English Ivy)",
+        "گندمی": "گیاه گندمی (Spider Plant)",
+        "سجافی": "گیاه گندمی (Spider Plant)",
+        "spider plant": "گیاه گندمی (Spider Plant)",
+        "کاکتوس": "کاکتوس (Cactus)",
+        "cactus": "کاکتوس (Cactus)",
+        "ساکولنت": "ساکولنت (Succulent)",
+        "succulent": "ساکولنت (Succulent)",
+        "نخل شامادورا": "نخل شامادورا (Chamaedorea)",
+        "شامادورا": "نخل شامادورا (Chamaedorea)",
+        "نخل اریکا": "نخل اریکا (Areca Palm)",
+        "اریکا": "نخل اریکا (Areca Palm)",
+        "بگونیا": "بگونیا (Begonia)",
+        "begonia": "بگونیا (Begonia)",
+        "پپرومیا": "پپرومیا (Peperomia)",
+        "پیرومیا": "پپرومیا (Peperomia)",
+        "peperomia": "پپرومیا (Peperomia)",
+        "کالاتیا": "کالاته‌آ (Calathea)",
+        "کالاته آ": "کالاته‌آ (Calathea)",
+        "calathea": "کالاته‌آ (Calathea)",
+        "فیلودندرون": "فیلودندرون (Philodendron)",
+        "philodendron": "فیلودندرون (Philodendron)",
+        "سرخس": "سرخس (Fern)",
+        "fern": "سرخس (Fern)",
+        "بونسای": "بونسای (Bonsai)",
+        "bonsai": "بونسای (Bonsai)",
+        "حسن یوسف": "حسن‌یوسف (Coleus)",
+        "حسن‌یوسف": "حسن‌یوسف (Coleus)",
+        "coleus": "حسن‌یوسف (Coleus)",
+    }
+
     SUBSTRATE_MAP: Dict[str, str] = {
         "inert_soilless": "inert_soilless",
         "کوکوپیت": "inert_soilless",
@@ -184,6 +257,14 @@ class EntityExtractorService:
                         response = await asyncio.wait_for(coro, timeout=30.0)
                         parsed = response.choices[0].message.parsed
                         if parsed is not None:
+                            if parsed.species_query:
+                                is_supported = bool(self.resolve_species_id(parsed.species_query))
+                                if not is_supported:
+                                    parsed.unsupported_species = parsed.species_query
+                                    if "species" in parsed.missing_critical_info:
+                                        parsed.missing_critical_info = [
+                                            s for s in parsed.missing_critical_info if s != "species"
+                                        ]
                             return parsed
             except Exception as exc:
                 logger.warning(
@@ -206,11 +287,38 @@ class EntityExtractorService:
         intent: Optional[str] = None
         health_status: str = "UNKNOWN"
 
-        # 1. Species Detection
+        # 1. Species Detection (Supported Knowledge Base Species First)
         for alias in sorted(self.SPECIES_MAP.keys(), key=len, reverse=True):
             if alias in msg:
                 species_q = self.SPECIES_MAP[alias]
                 break
+
+        # 1b. Popular Unsupported Species Detection
+        if not species_q:
+            for alias in sorted(self.POPULAR_UNSUPPORTED_SPECIES.keys(), key=len, reverse=True):
+                if alias in msg:
+                    species_q = self.POPULAR_UNSUPPORTED_SPECIES[alias]
+                    break
+
+        # 1c. Generic Persian Plant Mention Regex Patterns
+        if not species_q:
+            persian_plant_patterns = [
+                r"(?:یک\s+)?(?:گیاه|گلدان|درختچه|درخت|گل)\s+([آ-یa-zA-Z\s]+?)(?:\s+(?:دارم|داریم|هست|من|رو|خریدم|کاشتم|$))",
+                r"(?:گیاه|گلدان|گل)\s+([آ-یa-zA-Z]+)",
+            ]
+            for pattern in persian_plant_patterns:
+                match = re.search(pattern, msg)
+                if match:
+                    extracted_name = match.group(1).strip()
+                    if extracted_name and len(extracted_name) > 2 and extracted_name not in ["من", "شما", "ما", "خانگی", "آپارتمانی"]:
+                        species_q = extracted_name
+                        break
+
+        # Check if detected species is unsupported in KB
+        unsupported_species = None
+        if species_q:
+            if not self.resolve_species_id(species_q):
+                unsupported_species = species_q
 
         # 2. Substrate Detection
         for alias in sorted(self.SUBSTRATE_MAP.keys(), key=len, reverse=True):
@@ -322,7 +430,7 @@ class EntityExtractorService:
         else:
             user_intent = "UNSPECIFIED"
 
-        # 8. Missing Critical Info
+        # 9. Missing Critical Info
         missing: List[str] = []
         if not species_q:
             missing.append("species")
@@ -341,6 +449,7 @@ class EntityExtractorService:
             health_confirmed=health_confirmed,
             trait_confirmed=trait_confirmed,
             reported_symptoms=symptoms,
+            unsupported_species=unsupported_species,
             missing_critical_info=missing,
         )
 

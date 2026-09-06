@@ -12,6 +12,7 @@ from app.models.agent_state import ExtractedPlantEntities, PlantCareState
 from app.models.knowledge_base import PhaseModel, SpeciesModel, SubstrateModel, TraitModel
 from app.services.digital_twin_service import DigitalTwinService
 from app.services.extractor_service import EntityExtractorService
+from app.services.species_request_service import SpeciesRequestService
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,12 @@ class PlantDiagnosticGraph:
         kb_manager: Optional[KnowledgeBaseManager] = None,
         extractor: Optional[EntityExtractorService] = None,
         digital_twin_service: Optional[DigitalTwinService] = None,
+        species_request_service: Optional[SpeciesRequestService] = None,
     ):
         self.kb = kb_manager or default_kb_manager
         self.extractor = extractor or EntityExtractorService()
         self.digital_twin_service = digital_twin_service
+        self.species_request_service = species_request_service
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -243,9 +246,30 @@ class PlantDiagnosticGraph:
             elif any(term in msg_lower for term in ["تعویض گلدان", "تعویض خاک", "repotting", "repot"]):
                 user_goal = "repotting"
 
+        # Resolve unsupported species if species_id is None but user specified a plant
+        prev_extracted = state.get("extracted_entities") or {}
+        species_query = new_extracted_obj.species_query or prev_extracted.get("species_query")
+
+        unsupported_species: Optional[str] = None
+        is_new_unsupported_mention: bool = False
+        if species_id:
+            unsupported_species = None
+            is_new_unsupported_mention = False
+        elif new_extracted_obj.unsupported_species:
+            unsupported_species = new_extracted_obj.unsupported_species
+            is_new_unsupported_mention = True
+        elif new_extracted_obj.species_query:
+            unsupported_species = new_extracted_obj.species_query
+            is_new_unsupported_mention = True
+        elif state.get("unsupported_species"):
+            unsupported_species = state.get("unsupported_species")
+            is_new_unsupported_mention = False
+
         # Merge raw extraction dictionaries for history
         merged_extracted = {
-            "species_query": new_extracted_obj.species_query or prev_extracted.get("species_query"),
+            "species_query": species_query,
+            "unsupported_species": unsupported_species,
+            "is_new_unsupported_mention": is_new_unsupported_mention,
             "substrate_query": new_extracted_obj.substrate_query or prev_extracted.get("substrate_query"),
             "traits_queries": list(dict.fromkeys((prev_extracted.get("traits_queries") or []) + (new_extracted_obj.traits_queries or []))),
             "phase_query": new_extracted_obj.phase_query or prev_extracted.get("phase_query"),
@@ -262,7 +286,10 @@ class PlantDiagnosticGraph:
         # 4. Multi-Stage Clinical Gate Slot Filling
         missing_slots: List[str] = []
 
-        if not species_id:
+        if unsupported_species and not species_id:
+            # Species is not cataloged in Knowledge Base: stop clinical slot collection immediately!
+            missing_slots = []
+        elif not species_id:
             missing_slots.append("species")
         elif not substrate_id:
             # Gate 1b: Substrate
@@ -343,6 +370,8 @@ class PlantDiagnosticGraph:
             "health_confirmed": health_confirmed,
             "trait_confirmed": trait_confirmed,
             "reported_symptoms": reported_symptoms,
+            "unsupported_species": unsupported_species,
+            "is_new_unsupported_mention": is_new_unsupported_mention,
             "resolved_species_id": species_id,
             "resolved_substrate_id": substrate_id,
             "resolved_trait_ids": trait_ids,
@@ -361,6 +390,31 @@ class PlantDiagnosticGraph:
     async def node_sync_digital_twin(self, state: PlantCareState) -> Dict[str, Any]:
         plant_id = state.get("plant_id")
         user_id = state.get("user_id")
+
+        # Record unsupported species if newly mentioned
+        unsupported_species = state.get("unsupported_species")
+        is_new_mention = state.get("is_new_unsupported_mention")
+        if is_new_mention is None:
+            is_new_mention = True
+        if unsupported_species and is_new_mention:
+            try:
+                if self.species_request_service:
+                    await self.species_request_service.record_unsupported_species(
+                        user_id=user_id or "anonymous_user",
+                        raw_query=unsupported_species,
+                        session_id=state.get("session_id"),
+                        user_message=state.get("user_message"),
+                    )
+                elif self.digital_twin_service and getattr(self.digital_twin_service, "session", None):
+                    svc = SpeciesRequestService(session=self.digital_twin_service.session)
+                    await svc.record_unsupported_species(
+                        user_id=user_id or "anonymous_user",
+                        raw_query=unsupported_species,
+                        session_id=state.get("session_id"),
+                        user_message=state.get("user_message"),
+                    )
+            except Exception as exc:
+                logger.warning(f"Error recording unsupported species request: {exc}")
 
         if not self.digital_twin_service:
             return {}
@@ -677,17 +731,28 @@ class PlantDiagnosticGraph:
         health_confirmed = state.get("health_confirmed")
         trait_confirmed = state.get("trait_confirmed")
         reported_symptoms = state.get("reported_symptoms") or []
+        unsupported_species = state.get("unsupported_species")
+        extracted = state.get("extracted_entities") or {}
+        unsupported_name = (
+            unsupported_species
+            or extracted.get("unsupported_species")
+            or (extracted.get("species_query") if not species_data and not state.get("resolved_species_id") else None)
+        )
 
-        species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
-        trait_labels = [t.get("label") for t in (state.get("traits_data") or []) if t.get("label")]
-        plant_desc = f"{species_name} {' '.join(trait_labels)}".strip() if trait_labels else species_name
+        if not species_data and unsupported_name:
+            species_name = unsupported_name
+            plant_desc = unsupported_name
+        else:
+            species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
+            trait_labels = [t.get("label") for t in (state.get("traits_data") or []) if t.get("label")]
+            plant_desc = f"{species_name} {' '.join(trait_labels)}".strip() if trait_labels else species_name
 
         llm_instruction = ""
         clinical_data_summary: Dict[str, Any] = {}
         fallback_response = ""
 
-        # Branch 1: Species is completely unknown (Initial Welcome)
-        if "species" in missing_slots or not species_data:
+        # Branch 1: Species is completely unknown / No plant mentioned at all (Initial Welcome)
+        if ("species" in missing_slots or (not species_data and not unsupported_name)) and not unsupported_name:
             clinical_data_summary = {
                 "situation": "گونه گیاه هنوز مشخص نیست.",
                 "user_message": state.get("user_message", ""),
@@ -706,6 +771,45 @@ class PlantDiagnosticGraph:
                 + "\n".join(questions)
                 + "\n\nلطفاً این موارد را بفرمایید تا محاسبات دقیق تغذیه و سلامت گیاه انجام شود."
             )
+
+        # Branch 1b: User mentioned an unsupported species not yet in Knowledge Base
+        elif unsupported_name and not species_data:
+            user_msg = state.get("user_message", "")
+            is_new_mention = state.get("is_new_unsupported_mention")
+            if is_new_mention is None:
+                is_new_mention = any(p in user_msg for p in [unsupported_name, "گیاه", "پتوس", "سانسوریا", "زاموفیلیا", "فیکوس", "آگلونما", "یوکا", "دیفن"])
+
+            clinical_data_summary = {
+                "situation": f"گونه '{unsupported_name}' در پایگاه دانش موجود نیست. درخواست ثبت این گونه در سیستم ذخیره گردید و ادامه مشاوره تخصصی برای آن متوقف شد.",
+                "plant_name": unsupported_name,
+                "user_message": user_msg,
+            }
+
+            if is_new_mention:
+                llm_instruction = (
+                    f"به کاربر با احترام و خوش‌برخورد توضیح دهید که گیاه «{unsupported_name}» او شناسایی شد و درخواست ثبت شناسنامه تخصصی این گونه در دیتابیس سامانه ذخیره گردید تا در آینده تدوین شود. "
+                    f"به طور کاملاً شفاف و مودبانه اعلام کنید که در حال حاضر به دلیل نبود شناسنامه علمی و پروتکل گیاه‌پزشکی این گونه در پایگاه دانش، امکان صدور نسخه و ادامه مشاوره برای آن وجود ندارد. "
+                    f"از کاربر بخواهید در صورت تمایل، نام گیاه پشتیبانی‌شده دیگری (مانند برگ‌انجیری، درخت لیمو و...) را بفرماید. "
+                    f"اکیداً هیچ سوالی درباره خاک، بستر، علائم، نور، آبیاری یا کوددهی نپرسید و هیچ اطلاعات دیگری درخواست نکنید."
+                )
+                fallback_response = (
+                    f"سلام! گیاه **{unsupported_name}** شما شناسایی شد. 🌱\n\n"
+                    f"📋 **اطلاعیه پایگاه دانش:**\n"
+                    f"در حال حاضر شناسنامه علمی و پروتکل تخصصی گیاه **{unsupported_name}** در پایگاه دانش ثبت نشده است. "
+                    f"درخواست ثبت این گونه در سیستم ذخیره گردید تا توسط تیم اگرونومی فایل منبع آن تدوین شود.\n\n"
+                    f"با توجه به عدم وجود داده‌های تخصصی این گونه، امکان ارائه نسخه و ادامه فرآیند مشاوره برای این گیاه وجود ندارد. "
+                    f"در صورت تمایل می‌توانید نام گیاه دیگری (مانند برگ‌انجیری، درخت لیمو و...) را بفرمایید تا شما را راهنمایی کنم."
+                )
+            else:
+                llm_instruction = (
+                    f"به کاربر با احترام و صمیمیت یادآوری کنید که برای گیاه «{unsupported_name}» به دلیل عدم وجود شناسنامه علمی در پایگاه دانش، امکان ادامه فرآیند مشاوره و دریافت مشخصات خاک یا کوددهی وجود ندارد و درخواست ثبت این گونه قبلاً ذخیره شده است. "
+                    f"از کاربر بخواهید در صورت تمایل نام گیاه پشتیبانی‌شده دیگری را اعلام کند و هیچ سوالی درباره خاک، علائم یا کوددهی نپرسید."
+                )
+                fallback_response = (
+                    f"همان‌طور که اشاره شد، شناسنامه تخصصی گیاه **{unsupported_name}** هنوز در پایگاه دانش ثبت نشده و درخواست آن در سیستم ذخیره گردیده است.\n\n"
+                    f"به همین دلیل امکان ثبت مشخصات خاک یا صدور نسخه کودی برای این گیاه وجود ندارد.\n\n"
+                    f"در صورتی که گیاه دیگری (مانند برگ‌انجیری، درخت لیمو و...) دارید، لطفاً نام آن را بفرمایید تا فرآیند مشاوره آغاز شود."
+                )
 
         # Branch 2: Pathology Triage / Sick Plant with Symptoms (BLOCK FERTILIZER)
         elif health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or user_intent == "DIAGNOSIS_SYMPTOM":
@@ -1038,6 +1142,7 @@ def create_plant_care_graph(
     kb_manager: Optional[KnowledgeBaseManager] = None,
     extractor: Optional[EntityExtractorService] = None,
     digital_twin_service: Optional[DigitalTwinService] = None,
+    species_request_service: Optional[SpeciesRequestService] = None,
 ):
     """
     Factory function to instantiate and return the compiled LangGraph diagnostic workflow.
@@ -1046,5 +1151,6 @@ def create_plant_care_graph(
         kb_manager=kb_manager,
         extractor=extractor,
         digital_twin_service=digital_twin_service,
+        species_request_service=species_request_service,
     )
     return agent.graph

@@ -53,6 +53,10 @@ class ExtractedPlantEntities(BaseModel):
         default_factory=list,
         description="Any observed physiological symptoms or pests, e.g., ['زردی برگ', 'کنه', 'سیاه شدن ساقه', 'لکه قهوه‌ای'].",
     )
+    unsupported_species: Optional[str] = Field(
+        default=None,
+        description="Raw or normalized species name when user mentioned a plant not yet supported in Knowledge Base.",
+    )
     missing_critical_info: List[str] = Field(
         default_factory=list,
         description="Critical variables missing from the prompt needed for safe care prescription.",
@@ -78,6 +82,8 @@ class PlantCareState(TypedDict, total=False):
     health_confirmed: Optional[bool]
     trait_confirmed: Optional[bool]
     reported_symptoms: List[str]
+    unsupported_species: Optional[str]
+    is_new_unsupported_mention: Optional[bool]
 
     # Resolved knowledge base IDs
     resolved_species_id: Optional[str]

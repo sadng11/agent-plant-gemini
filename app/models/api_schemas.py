@@ -155,3 +155,16 @@ class PhaseSummaryResponse(BaseModel):
     suppress_high_nitrogen: bool = False
     override_npk_ratio: Optional[str] = None
     mandatory_supplements: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class UnsupportedSpeciesResponse(BaseModel):
+    id: str
+    user_id: str
+    session_id: Optional[str] = None
+    raw_query: str
+    normalized_name: str
+    user_message: Optional[str] = None
+    status: str
+    request_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

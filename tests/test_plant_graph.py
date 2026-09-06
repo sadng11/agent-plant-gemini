@@ -18,8 +18,10 @@ from app.agents.plant_graph import PlantDiagnosticGraph, create_plant_care_graph
 from app.core.kb_loader import KnowledgeBaseManager
 from app.db.session import Base
 from app.models.agent_state import ExtractedPlantEntities, PlantCareState
+from app.models.db_models import UnsupportedSpeciesRequest
 from app.services.digital_twin_service import DigitalTwinService
 from app.services.extractor_service import EntityExtractorService
+from app.services.species_request_service import SpeciesRequestService
 
 
 @pytest_asyncio.fixture
@@ -659,5 +661,96 @@ async def test_plant_diagnostic_streaming_generator(kb_manager: KnowledgeBaseMan
     final_state = done_events[0]["final_state"]
     assert "species" in final_state.get("missing_slots", [])
     assert len(final_state.get("final_response", "")) > 0
+
+
+@pytest.mark.asyncio
+async def test_unsupported_species_pothos_recognition_and_recording(
+    kb_manager: KnowledgeBaseManager,
+    db_session: AsyncSession,
+):
+    """
+    Test that when a user says 'من یک گیاه پتوس دارم':
+    1. Extractor recognizes species as 'پتوس'
+    2. 'species' is NOT in missing_slots (doesn't ask 'نام گیاه چیست')
+    3. The response acknowledges 'پتوس'
+    4. The species is recorded into the unsupported_species_requests database table.
+    """
+    extractor = EntityExtractorService()
+    extractor.client = None  # Ensure deterministic rule-based mode
+    species_req_service = SpeciesRequestService(session=db_session)
+    dt_service = DigitalTwinService(session=db_session)
+
+    agent = PlantDiagnosticGraph(
+        kb_manager=kb_manager,
+        extractor=extractor,
+        digital_twin_service=dt_service,
+        species_request_service=species_req_service,
+    )
+
+    initial_state: PlantCareState = {
+        "user_id": "user_pothos_test",
+        "session_id": str(uuid.uuid4()),
+        "user_message": "من یک گیاه پتوس دارم",
+    }
+
+    final_state = await agent.graph.ainvoke(initial_state)
+
+    # Assertions for Turn 1
+    assert final_state.get("missing_slots") == []
+    assert final_state.get("unsupported_species") is not None
+    assert "پتوس" in final_state.get("unsupported_species")
+    response_text = final_state.get("final_response", "")
+    assert "پتوس" in response_text
+    # Ensure it did NOT ask for plant name or soil
+    assert "نام یا گونه گیاه شما چیست؟" not in response_text
+    assert "در چه نوع خاکی کاشته شده است" not in response_text
+
+    # Verify database persistence in UnsupportedSpeciesRequest table
+    records = await species_req_service.get_unsupported_species_requests()
+    assert len(records) >= 1
+    pothos_record = next(r for r in records if "پتوس" in r.normalized_name or "پتوس" in r.raw_query)
+    assert pothos_record.request_count == 1
+    assert pothos_record.user_id == "user_pothos_test"
+
+    # Turn 2: User says "کوکوپیت و پرلیت"
+    turn2_state: PlantCareState = {
+        **final_state,
+        "user_message": "کوکوپیت و پرلیت",
+    }
+    t2_state = await agent.graph.ainvoke(turn2_state)
+    assert t2_state.get("missing_slots") == []
+    t2_response = t2_state.get("final_response", "")
+    # Should remind that this species is unsupported without re-asking for soil or looping
+    assert "در چه نوع خاکی کاشته شده است" not in t2_response
+    assert "ثبت نشده" in t2_response
+    # Database request_count should remain 1 (not incremented on follow-up answer)
+    records_after = await species_req_service.get_unsupported_species_requests()
+    pothos_after = next(r for r in records_after if "پتوس" in r.normalized_name or "پتوس" in r.raw_query)
+    assert pothos_after.request_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unsupported_species_frequency_increment(
+    db_session: AsyncSession,
+):
+    """
+    Test that calling record_unsupported_species multiple times for the same normalized plant
+    increments the request_count.
+    """
+    service = SpeciesRequestService(session=db_session)
+    r1 = await service.record_unsupported_species(
+        user_id="user_1",
+        raw_query="پتوس",
+        user_message="من یک پتوس دارم",
+    )
+    assert r1.request_count == 1
+
+    r2 = await service.record_unsupported_species(
+        user_id="user_2",
+        raw_query="گیاه پتوس",
+        user_message="پتوس ابلق دارم",
+    )
+    assert r2.id == r1.id
+    assert r2.request_count == 2
 
 
