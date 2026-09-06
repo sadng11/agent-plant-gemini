@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
-UserIntent = Literal["UNSPECIFIED", "FEEDING_CARE", "DIAGNOSIS_SYMPTOM", "GENERAL_CARE"]
+UserIntent = Literal["UNSPECIFIED", "FEEDING_CARE", "DIAGNOSIS_SYMPTOM", "GENERAL_CARE", "RECOVERY_CONFIRMED"]
 
 
 class ExtractedPlantEntities(BaseModel):
@@ -84,6 +84,7 @@ class PlantCareState(TypedDict, total=False):
     health_confirmed: Optional[bool]
     trait_confirmed: Optional[bool]
     reported_symptoms: List[str]
+    is_recovery_reported: Optional[bool]
     unsupported_species: Optional[str]
     is_new_unsupported_mention: Optional[bool]
 

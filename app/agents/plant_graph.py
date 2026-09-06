@@ -202,30 +202,56 @@ class PlantDiagnosticGraph:
 
         phase_id = new_phase or state.get("resolved_phase_id")
 
-        # Health confirmation handling
+        # Health confirmation & recovery handling
         healthy_patterns = [
             "کاملا سالم", "کاملاً سالم", "سالم است", "سالمه", "مشکلی نداره",
             "مشکل نداره", "بدون آفت", "آفت نداره", "بیماری نداره",
             "هیچ علائمی نداره", "سرحاله", "سرحال است", "عالیه", "بدون مشکل",
             "healthy", "no pests"
         ]
+        recovery_patterns = [
+            "مشکل حل شد", "مشکلش حل شد", "مشکل برطرف شد", "حل شد", "برطرف شد",
+            "خطر رفع شد", "رفع شد", "درمان شد", "بهبود پیدا کرده", "بهبود یافته",
+            "بهتر شده", "بهتر شد", "سالم شده", "سالم شد", "خوب شده", "خوب شد",
+            "حالش خوبه", "حالش کاملا خوبه", "حالش کاملاً خوبه", "حالش بهتره",
+            "حال گیاه خوب شده", "به حالت عادی بازگشته", "به حالت عادی برگشته",
+            "برگ جدید زده", "برگ جدید داده", "جوانه زده", "ریشه جدید زده", "ریشه نو زده",
+            "روبراه شد", "رو به راهه", "رو به راه شده", "سرحال شده",
+            "دیگه مشکلی نداره", "دیگه زرد نمیشه", "دیگه لکه نداره"
+        ]
+
+        is_recovery_in_msg = any(r in msg_lower for r in recovery_patterns)
+        is_healthy_in_msg = any(h in msg_lower for h in healthy_patterns)
+        is_recovery = is_recovery_in_msg or new_extracted_obj.user_intent == "RECOVERY_CONFIRMED"
+        is_healthy = is_healthy_in_msg or (new_extracted_obj.health_status == "HEALTHY" and new_extracted_obj.health_confirmed is True)
 
         prev_health_confirmed = state.get("health_confirmed")
         prev_symptoms = state.get("reported_symptoms") or []
-        reported_symptoms = list(dict.fromkeys(prev_symptoms + (new_extracted_obj.reported_symptoms or [])))
+        prev_health_status = state.get("health_status")
 
-        if new_extracted_obj.health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or new_extracted_obj.health_confirmed is False:
-            health_confirmed = False
-            health_status = "SICK_OR_SYMPTOMATIC"
-        elif any(h in msg_lower for h in healthy_patterns):
+        has_new_symptoms = bool(new_extracted_obj.reported_symptoms)
+        is_new_sickness = has_new_symptoms or (new_extracted_obj.health_status == "SICK_OR_SYMPTOMATIC" and not is_recovery) or (new_extracted_obj.health_confirmed is False and not is_recovery)
+
+        is_recovery_reported = False
+
+        if (is_recovery or is_healthy) and not has_new_symptoms:
             health_confirmed = True
             health_status = "HEALTHY"
+            reported_symptoms = []  # Clear previous pathology symptoms upon confirmed recovery!
+            if is_recovery or prev_health_status in ["SICK_OR_SYMPTOMATIC", "CRITICAL", "ROOT_ROT_RISK"]:
+                is_recovery_reported = True
+        elif is_new_sickness:
+            health_confirmed = False
+            health_status = "SICK_OR_SYMPTOMATIC"
+            reported_symptoms = list(dict.fromkeys(prev_symptoms + (new_extracted_obj.reported_symptoms or [])))
         elif prev_health_confirmed is not None:
             health_confirmed = prev_health_confirmed
-            health_status = state.get("health_status") or ("HEALTHY" if health_confirmed else "UNKNOWN")
+            health_status = prev_health_status or ("HEALTHY" if health_confirmed else "UNKNOWN")
+            reported_symptoms = prev_symptoms
         else:
             health_confirmed = None
             health_status = "UNKNOWN"
+            reported_symptoms = []
 
         # Intent resolution
         new_intent = new_extracted_obj.user_intent or new_extracted_obj.intent or "UNSPECIFIED"
@@ -237,10 +263,12 @@ class PlantDiagnosticGraph:
             user_intent = "FEEDING_CARE"
         elif any(term in msg_lower for term in ["آبیاری", "نور", "لوکس", "رطوبت", "دما", "نگهداری", "شرایط نگهداری", "تعویض گلدان", "تعویض خاک", "repotting"]):
             user_intent = "GENERAL_CARE"
+        elif is_recovery_reported or new_intent == "RECOVERY_CONFIRMED":
+            user_intent = "RECOVERY_CONFIRMED"
         elif new_intent in ["FEEDING_CARE", "GENERAL_CARE"]:
             user_intent = new_intent
         elif new_intent == "UNSPECIFIED":
-            if prev_intent and prev_intent not in ["UNSPECIFIED", "GENERAL_INTRO"]:
+            if prev_intent and prev_intent not in ["UNSPECIFIED", "GENERAL_INTRO", "DIAGNOSIS_SYMPTOM"]:
                 user_intent = prev_intent
             else:
                 user_intent = "UNSPECIFIED"
@@ -385,6 +413,7 @@ class PlantDiagnosticGraph:
             "health_confirmed": health_confirmed,
             "trait_confirmed": trait_confirmed,
             "reported_symptoms": reported_symptoms,
+            "is_recovery_reported": is_recovery_reported,
             "unsupported_species": unsupported_species,
             "is_new_unsupported_mention": is_new_unsupported_mention,
             "resolved_species_id": species_id,
@@ -524,7 +553,21 @@ class PlantDiagnosticGraph:
                     if trait_ids and trait_ids != (list(plant.traits) if plant.traits else []):
                         updates["traits"] = trait_ids
                     if health_status and health_status != plant.health_status and health_status != "UNKNOWN":
+                        old_status = plant.health_status
                         updates["health_status"] = health_status
+                        if health_status == "HEALTHY" and old_status in ["SICK_OR_SYMPTOMATIC", "CRITICAL", "ROOT_ROT_RISK"]:
+                            try:
+                                await self.digital_twin_service.log_event(
+                                    plant_id=plant.id,
+                                    event_type="HEALTH_RESTORED",
+                                    details={
+                                        "previous_status": old_status,
+                                        "status": "HEALTHY",
+                                        "note": "وضعیت سلامت گیاه پس از دوره درمان و بهبود به حالت سالم (HEALTHY) به‌روزرسانی شد.",
+                                    },
+                                )
+                            except Exception as log_exc:
+                                logger.warning(f"Could not log HEALTH_RESTORED event: {log_exc}")
 
                     if updates:
                         await self.digital_twin_service.update_plant_state(plant.id, updates)
@@ -653,7 +696,20 @@ class PlantDiagnosticGraph:
                         details={"risk_type": "SUBSTRATE", "risk_message": risk_message},
                     )
                 elif health_confirmed is True and health_status == "HEALTHY":
-                    await self.digital_twin_service.update_plant_state(plant_id, {"health_status": "HEALTHY"})
+                    plant = await self.digital_twin_service.get_plant_by_id(plant_id)
+                    if plant and plant.health_status != "HEALTHY":
+                        await self.digital_twin_service.update_plant_state(plant_id, {"health_status": "HEALTHY"})
+                        await self.digital_twin_service.log_event(
+                            plant_id=plant_id,
+                            event_type="HEALTH_RESTORED",
+                            details={
+                                "previous_status": plant.health_status,
+                                "status": "HEALTHY",
+                                "note": "وضعیت سلامت گیاه پس از دوره درمان و بهبود به حالت سالم (HEALTHY) به‌روزرسانی شد.",
+                            },
+                        )
+                    elif plant:
+                        await self.digital_twin_service.update_plant_state(plant_id, {"health_status": "HEALTHY"})
             except Exception as exc:
                 logger.warning(f"Failed to sync digital twin health state in triage: {exc}")
 
@@ -1008,6 +1064,34 @@ class PlantDiagnosticGraph:
                         f"پس از آغاز رویش بافت‌های جدید و سالم، برنامه کودی صادر خواهد شد."
                     )
 
+        # Branch 2b: Plant Health Recovery & Restoration (Problem Solved / Recovery Confirmed)
+        elif (state.get("is_recovery_reported") or user_intent == "RECOVERY_CONFIRMED") and user_intent != "FEEDING_CARE":
+            substrate_name = substrate_data.get("label", "") if substrate_data else ""
+            clinical_data_summary = {
+                "situation": f"گیاه {plant_desc} پس از دوره درمان و مراقبت، کاملاً بهبود یافته، بافت‌ها و برگ‌های جدید روییده و وضعیت آن در باغچه فیتو به سالم (HEALTHY) به‌روزرسانی شد.",
+                "plant": plant_desc,
+                "substrate": substrate_name,
+                "user_message": state.get("user_message", ""),
+            }
+            llm_instruction = (
+                f"به گرمی و با شور و شوق تخصصی از التیام، بهبود و احیای کامل گیاه {plant_desc} استقبال کنید (اکیداً مجدداً سلام نکنید). "
+                f"صریحاً به کاربر اطلاع دهید که وضعیت سلامت گیاه در «باغچه من» با موفقیت از حالت عارضه‌دار به «سالم» (HEALTHY) تغییر پیدا کرد. "
+                f"توصیه بالینی اگرونومی: با توجه به تازه بودن ریشه‌ها و برگ‌های جدید، فواصل آبیاری را بر اساس نیاز عمق خاک تنظیم کنند و از غرقاب شدن بپرهیزند. "
+                f"اعلام کنید که اکنون با تایید شاخص‌های سلامت بالینی، مانع کودی برطرف شده و در صورت تمایل می‌توان برنامه کودی تخصصی ۴ هفته‌ای را برای گیاه آغاز کرد. "
+                f"از کاربر بپرسید آیا مایل است برنامه کودی ۴ هفته‌ای را دریافت کند یا راهنمایی دیگری نیاز دارد."
+            )
+            fallback_response = (
+                f"🌱 **تبریک! گزارش بهبود و احیای سلامت {plant_desc}**\n\n"
+                f"بسیار خرسندم که با مراقبت و اقدامات به‌موقع، علائم عارضه برطرف شده و گیاه شما با رویش بافت‌ها و برگ‌های جدید به شرایط پایدار و سلامت کامل بازگشته است. 🩺✨\n\n"
+                f"📋 **به‌روزرسانی وضعیت در باغچه من:**\n"
+                f"وضعیت سلامت گیاه در باغچه دیجیتال شما با موفقیت از حالت عارضه‌دار به **«سالم» (HEALTHY)** تغییر یافت.\n\n"
+                f"🌿 **توصیه‌های بالینی پس از بهبود:**\n"
+                f"۱. **مدیریت آبیاری:** با توجه به تشکیل ریشه‌های جوان، فواصل آبیاری را بر اساس خشکی مناسب عمق خاک حفظ کرده و از خروج آب اضافی از زهکش مطمئن شوید.\n"
+                f"۲. **نور غیرمستقیم باکیفیت:** نور مناسب به تثبیت بافت و فتوسنتز فعال برگ‌های تازه کمک شایانی می‌کند.\n"
+                f"۳. **آمادگی برای تغذیه:** اکنون که شاخص‌های سلامت تایید شده است، مانع صدور کود برطرف شده و امکان تنظیم **برنامه کودی تخصصی ۴ هفته‌ای** فراهم است.\n\n"
+                f"آیا مایلید **برنامه کودی ۴ هفته‌ای** متناسب با {plant_desc} را برایتان تنظیم کنم؟"
+            )
+
         # Branch 3: Missing Substrate (Gate 1b)
         elif "substrate" in missing_slots or not substrate_data:
             clinical_data_summary = {
@@ -1178,8 +1262,16 @@ class PlantDiagnosticGraph:
             if feasibility_status == "UNREALISTIC" and feasibility_message:
                 llm_instruction += f"\n📌 یادداشت مهم اگرونومی: حتماً به کاربر توضیح دهید که {feasibility_message}."
 
+            recovery_prefix = ""
+            if state.get("is_recovery_reported"):
+                recovery_prefix = (
+                    "🌱 **تبریک به خاطر بهبود گیاه!**\n"
+                    "وضعیت سلامت گیاه در «باغچه من» با موفقیت به **«سالم» (HEALTHY)** تغییر یافت. "
+                    "با توجه به رفع عارضه و احیای ریشه‌ها، برنامه کودی ۴ هفته‌ای با دوز ملایم به شرح زیر تقدیم می‌شود:\n\n"
+                )
+
             lines = [
-                f"🌿 **نسخه تخصصی و تقویم تغذیه ۴ هفته‌ای برای {plant_desc}**",
+                f"{recovery_prefix}🌿 **نسخه تخصصی و تقویم تغذیه ۴ هفته‌ای برای {plant_desc}**",
                 f"- **بستر شناسایی‌شده:** {substrate_name}",
             ]
             if feasibility_status == "UNREALISTIC" and feasibility_message:

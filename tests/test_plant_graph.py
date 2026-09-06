@@ -794,3 +794,90 @@ async def test_unsupported_species_frequency_increment(
     assert r2.request_count == 2
 
 
+@pytest.mark.asyncio
+async def test_plant_recovery_updates_status_and_clears_symptoms(
+    kb_manager: KnowledgeBaseManager,
+    db_session: AsyncSession,
+):
+    """
+    Test that when a plant has active symptoms (e.g. root rot), and the user reports recovery
+    ('مشکل حل شد' or 'به حالت عادی بازگشته و حالش کاملا خوبه'), the agent:
+    1. Updates health_status to HEALTHY in DB.
+    2. Logs a HEALTH_RESTORED event.
+    3. Clears reported_symptoms.
+    4. Issues a recovery response acknowledging improvement rather than repeating the disease diagnosis.
+    """
+    dt_service = DigitalTwinService(session=db_session)
+    plant = await dt_service.create_plant(
+        user_id="test_user_rec",
+        nickname="مونسترای بالکن",
+        species_id="monstera_deliciosa",
+        substrate_type="inert_soilless",
+        health_status="HEALTHY",
+    )
+    await db_session.commit()
+
+    extractor = EntityExtractorService()
+    extractor.api_key = None
+    graph = create_plant_care_graph(
+        kb_manager=kb_manager,
+        extractor=extractor,
+        digital_twin_service=dt_service,
+    )
+
+    # Turn 1: Sickness (Root rot reported)
+    turn1_state: PlantCareState = {
+        "user_id": "test_user_rec",
+        "session_id": "session_rec_1",
+        "plant_id": str(plant.id),
+        "user_message": "گیاه من دچار پوسیدگی ریشه شده است و برگاش داره قهوه ای میشه",
+        "recent_history": [],
+    }
+    t1_res = await graph.ainvoke(turn1_state)
+    await db_session.commit()
+
+    assert t1_res.get("health_status") == "SICK_OR_SYMPTOMATIC"
+    assert "پوسیدگی ریشه یا طوقه (Root Rot)" in t1_res.get("reported_symptoms", [])
+    plant_after_t1 = await dt_service.get_plant_by_id(plant.id)
+    assert plant_after_t1.health_status == "SICK_OR_SYMPTOMATIC"
+
+    # Turn 2: User reports recovery
+    turn2_state: PlantCareState = {
+        "user_id": "test_user_rec",
+        "session_id": "session_rec_1",
+        "plant_id": str(plant.id),
+        "user_message": "بعد از مدتی مراقبت، گیاه من الان به حالت عادی بازگشته و حالش کاملا خوبه چپنی برگ جدید و بزرگ زده",
+        "resolved_species_id": t1_res.get("resolved_species_id"),
+        "resolved_substrate_id": t1_res.get("resolved_substrate_id"),
+        "health_status": t1_res.get("health_status"),
+        "health_confirmed": t1_res.get("health_confirmed"),
+        "reported_symptoms": t1_res.get("reported_symptoms"),
+        "recent_history": [
+            {"role": "user", "content": turn1_state["user_message"]},
+            {"role": "assistant", "content": t1_res.get("final_response")},
+        ],
+    }
+    t2_res = await graph.ainvoke(turn2_state)
+    await db_session.commit()
+
+    # 1. State check
+    assert t2_res.get("health_status") == "HEALTHY"
+    assert t2_res.get("health_confirmed") is True
+    assert t2_res.get("reported_symptoms") == []
+    assert t2_res.get("user_intent") == "RECOVERY_CONFIRMED"
+
+    # 2. Database plant check (باغچه من)
+    plant_after_t2 = await dt_service.get_plant_by_id(plant.id)
+    assert plant_after_t2.health_status == "HEALTHY"
+
+    # 3. Database event check
+    events = await dt_service.get_plant_history(plant.id)
+    assert any(e.event_type == "HEALTH_RESTORED" for e in events)
+
+    # 4. Response check
+    response_text = t2_res.get("final_response", "")
+    assert any(w in response_text for w in ["بهبود", "احیای سلامت", "سالم", "تبریک"])
+    assert "پوسیدگی ریشه و طوقه مونسترا" not in response_text
+
+
+

@@ -20,14 +20,15 @@ EXTRACTION_SYSTEM_PROMPT = """
 - traits_queries: صفات و ویژگی‌های خاص مورفولوژیکی (مانند ابلق، دورنگ، مینیاتوری، variegated)
 - phase_query: فاز زیستی یا فنولوژیکی جاری (مانند رشد رویشی، گل‌دهی، تشکیل میوه، خواب زمستانه)
 - user_goal: هدف یا خواسته کاربر (مانند routine_care, disease_treatment, induce_flowering, repotting, general_consultation)
-- user_intent: نیت اصلی گفت‌وگو (یکی از مقادیر دقیق: UNSPECIFIED, FEEDING_CARE, DIAGNOSIS_SYMPTOM, GENERAL_CARE)
+- user_intent: نیت اصلی گفت‌وگو (یکی از مقادیر دقیق: UNSPECIFIED, FEEDING_CARE, DIAGNOSIS_SYMPTOM, GENERAL_CARE, RECOVERY_CONFIRMED)
   * UNSPECIFIED: کاربر فقط مشخصات گیاه، خاک یا صفت را معرفی کرده و هنوز سوال یا درخواست مشخصی نپرسیده است (مثل: «مونسترا ابلق در کوکوپیت»، «برگ‌انجیری دارم»، «کوکوپیت»، «ابلق است»).
   * FEEDING_CARE: کاربر صراحتاً درخواست برنامه کودی، دوز کود، جدول تغذیه، تقویت رشد یا خرید کود کرده است (مثل: «برنامه کودی می‌خوام»، «چه کودی بدم؟»، «کوددهی مونسترا»، «دریافت برنامه کودی و تغذیه تخصصی»).
   * DIAGNOSIS_SYMPTOM: کاربر از علائم بیماری، آفت، زردی برگ، لکه قهوه‌ای، سوختگی، قارچ، کنه یا شپشک صحبت می‌کند (مثل: «برگاش زرد شده»، «کنه زده چیکار کنم»، «عیب‌یابی زردی یا آفت»).
   * GENERAL_CARE: کاربر درباره نحوه آبیاری، میزان نور، رطوبت، دما، تعویض خاک/گلدان یا شرایط عمومی نگهداری سوال دارد (مثل: «چقدر آب بدم؟»، «نور مناسب مونسترا چقدره؟»، «شرایط نگهداری»، «راهنمای تعویض گلدان»).
+  * RECOVERY_CONFIRMED: کاربر اعلام می‌کند که عارضه یا مشکل گیاه برطرف شده، درمان شده یا به حالت عادی و سلامت بازگشته است (مثل: «مشکل حل شد»، «به حالت عادی بازگشته و حالش کاملا خوبه»، «خوب شده»، «برگ جدید زده و سالمه»).
 - health_status: وضعیت سلامت گیاه بر اساس پیام (یکی از مقادیر: HEALTHY, SICK_OR_SYMPTOMATIC, UNKNOWN)
 - health_confirmed: تاییدیه صریح سلامت گیاه توسط کاربر:
-  * true: اگر کاربر صریحاً اعلام کند گیاه کاملاً سالم، در حال رشد و بدون آفت/زردی است (مانند «کاملاً سالمه»، «مشکلی نداره»، «بدون آفت»)
+  * true: اگر کاربر صریحاً اعلام کند گیاه کاملاً سالم، در حال رشد و بدون آفت/زردی است یا مشکل و عارضه گیاه حل شده و گیاه بهبود یافته است (مانند «کاملاً سالمه»، «مشکلی نداره»، «بدون آفت»، «مشکل حل شد»، «بهبود یافته»، «حالش خوبه»، «برگ جدید داده»)
   * false: اگر گیاه دارای آفت، زردی، پوسیدگی یا بیماری باشد
   * null: اگر کاربر صحبتی از سلامت نکرده باشد
 - trait_confirmed: تاییدیه وضعیت ابلق بودن یا سبز ساده بودن گیاه:
@@ -332,9 +333,17 @@ class EntityExtractorService:
                 break
 
         # 5. Symptoms & Pathology Detection
-        # Remove negated health phrases first so "بدون آفت" does not trigger "آفت"
+        # Remove negated health and recovery phrases first so phrases like "مشکل حل شد" or "بدون آفت" do not trigger symptoms
         clean_msg_for_symptoms = msg
-        for neg_term in ["بدون آفت", "بدون لکه", "بدون بیماری", "بدون مشکل", "آفت نداره", "بیماری نداره", "لکه نداره", "مشکلی نداره", "مشکل نداره", "no pests", "no disease"]:
+        for neg_term in [
+            "مشکل حل شد", "مشکلش حل شد", "مشکل برطرف شد", "حل شد", "برطرف شد",
+            "خطر رفع شد", "رفع شد", "درمان شد", "درمان شده", "بهبود پیدا کرده",
+            "بهبود یافته", "بهبود یافت", "بهتر شده", "بهتر شد", "سالم شده", "سالم شد",
+            "به حالت عادی بازگشته", "به حالت عادی برگشته", "حالش کاملا خوبه", "حالش کاملاً خوبه",
+            "حالش خوبه", "حال گیاه خوب شده", "خوب شده", "خوب شد", "روبراه شد", "رو به راهه",
+            "بدون آفت", "بدون لکه", "بدون بیماری", "بدون مشکل", "آفت نداره", "بیماری نداره",
+            "لکه نداره", "مشکلی نداره", "مشکل نداره", "no pests", "no disease"
+        ]:
             clean_msg_for_symptoms = clean_msg_for_symptoms.replace(neg_term, "")
 
         symptom_keywords = {
@@ -362,21 +371,32 @@ class EntityExtractorService:
             user_goal = "induce_flowering"
         elif any(term in msg for term in ["تعویض گلدان", "تعویض خاک", "repotting", "repot"]):
             user_goal = "repotting"
-        elif symptoms or any(term in msg for term in ["بیمار", "آفت", "قارچ", "کنه", "شپشک", "زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه", "ریزش", "عیب‌یابی", "درمان"]):
+        elif symptoms or any(term in clean_msg_for_symptoms for term in ["بیمار", "آفت", "قارچ", "کنه", "شپشک", "زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه", "ریزش", "عیب‌یابی"]):
             user_goal = "disease_treatment"
         elif any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "تغذیه"]):
             user_goal = "routine_care"
         else:
             user_goal = "general_consultation"
 
-        # 7. Health Confirmation Detection
+        # 7. Health Confirmation & Recovery Detection
         health_positive_terms = [
             "کاملا سالم", "کاملاً سالم", "سالم است", "سالمه", "مشکلی نداره",
             "مشکل نداره", "بدون آفت", "آفت نداره", "بیماری نداره",
             "هیچ علائمی نداره", "سرحاله", "سرحال است", "عالیه", "بدون مشکل",
             "healthy", "no pests", "کاملاً سالم و بدون آفت"
         ]
-        is_health_confirmed = any(term in msg for term in health_positive_terms)
+        recovery_positive_terms = [
+            "مشکل حل شد", "مشکلش حل شد", "مشکل برطرف شد", "حل شد", "برطرف شد",
+            "خطر رفع شد", "رفع شد", "درمان شد", "بهبود پیدا کرده", "بهبود یافته",
+            "بهتر شده", "بهتر شد", "سالم شده", "سالم شد", "خوب شده", "خوب شد",
+            "حالش خوبه", "حالش کاملا خوبه", "حالش کاملاً خوبه", "حالش بهتره",
+            "حال گیاه خوب شده", "به حالت عادی بازگشته", "به حالت عادی برگشته",
+            "برگ جدید زده", "برگ جدید داده", "جوانه زده", "ریشه جدید زده", "ریشه نو زده",
+            "روبراه شد", "رو به راهه", "رو به راه شده", "سرحال شده",
+            "دیگه مشکلی نداره", "دیگه زرد نمیشه", "دیگه لکه نداره"
+        ]
+        is_recovery = any(term in msg for term in recovery_positive_terms)
+        is_health_confirmed = is_recovery or any(term in msg for term in health_positive_terms)
 
         # 8. Trait Confirmation Detection
         trait_plain_terms = [
@@ -397,15 +417,43 @@ class EntityExtractorService:
         health_confirmed: Optional[bool] = None
         user_intent: str = "UNSPECIFIED"
 
-        if symptoms or any(term in clean_msg_for_symptoms for term in ["بیمار", "آفت", "قارچ", "کنه", "شپشک", "زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه", "ریزش", "عیب‌یابی", "درمان"]):
+        has_active_disease_terms = any(term in clean_msg_for_symptoms for term in ["بیمار", "آفت", "قارچ", "کنه", "شپشک", "زرد", "سیاه", "سوخته", "پژمرده", "پوسیدگی", "لکه", "ریزش", "عیب‌یابی"])
+
+        if is_recovery and not has_active_disease_terms:
+            symptoms = []
+            health_status = "HEALTHY"
+            health_confirmed = True
+            user_goal = "routine_care"
+            if any(term in msg for term in [
+                "کود", "کوددهی", "کود دهی", "کود دهم", "کود بدم", "برنامه کودی", "برنامه کود",
+                "تقویت", "جدول کودی", "تغذیه", "تغذیه تخصصی", "نسخه کودی", "npk",
+                "fertilizer", "feeding", "چه کودی", "کود مناسب", "برنامه تغذیه", "تقویت رشد"
+            ]):
+                user_intent = "FEEDING_CARE"
+            elif any(term in msg for term in ["آبیاری", "نور", "لوکس", "رطوبت", "دما", "نگهداری", "شرایط نگهداری", "تعویض گلدان", "تعویض خاک"]):
+                user_intent = "GENERAL_CARE"
+            else:
+                user_intent = "RECOVERY_CONFIRMED"
+        elif symptoms or has_active_disease_terms:
             user_intent = "DIAGNOSIS_SYMPTOM"
             health_status = "SICK_OR_SYMPTOMATIC"
             health_confirmed = False
         elif is_health_confirmed:
             health_status = "HEALTHY"
             health_confirmed = True
-            if any(term in msg for term in ["کود", "کوددهی", "تقویت", "برنامه", "feeding", "fertilizer", "جدول", "تغذیه", "گل بده", "میوه"]):
+            if any(term in msg for term in [
+                "کود", "کوددهی", "کود دهی", "کود دهم", "کود بدم", "برنامه کودی", "برنامه کود",
+                "تقویت", "جدول کودی", "تغذیه", "تغذیه تخصصی", "نسخه کودی", "npk",
+                "fertilizer", "feeding", "چه کودی", "کود مناسب", "برنامه تغذیه", "تقویت رشد",
+                "دریافت برنامه کودی", "گل بده", "میوه بده", "میوه‌دهی", "شکوفه", "گلدهی", "flowering", "fruit"
+            ]):
                 user_intent = "FEEDING_CARE"
+            elif any(term in msg for term in [
+                "آبیاری", "آب بدم", "چقدر آب", "نور", "لوکس", "رطوبت", "دما", "نگهداری",
+                "شرایط نگهداری", "تعویض خاک", "تعویض گلدان", "repot", "repotting", "هرس",
+                "قلمه", "مراقبت", "راهنمای آبیاری", "راهنمای تعویض"
+            ]):
+                user_intent = "GENERAL_CARE"
             else:
                 user_intent = "UNSPECIFIED"
         elif any(term in msg for term in [

@@ -86,8 +86,10 @@ async def chat_diagnostic_stream(
                 prev_user_intent = m.payload["user_intent"]
             elif m.payload.get("intent"):
                 prev_user_intent = m.payload["intent"]
-            if m.payload.get("reported_symptoms"):
-                prev_reported_symptoms = list(dict.fromkeys(prev_reported_symptoms + (m.payload["reported_symptoms"] or [])))
+            if "reported_symptoms" in m.payload:
+                prev_reported_symptoms = m.payload["reported_symptoms"] or []
+            if m.payload.get("health_status") == "HEALTHY":
+                prev_reported_symptoms = []
             if m.payload.get("extracted_entities"):
                 prev_extracted.update(m.payload["extracted_entities"])
 
@@ -189,6 +191,7 @@ async def chat_diagnostic_stream(
                 "user_intent": final_state.get("user_intent"),
                 "intent": final_state.get("intent") or final_state.get("user_intent"),
                 "reported_symptoms": final_state.get("reported_symptoms", []),
+                "is_recovery_reported": final_state.get("is_recovery_reported", False),
             }
 
             new_plant_id = final_state.get("plant_id")
@@ -290,8 +293,10 @@ async def chat_diagnostic(
                 prev_user_intent = m.payload["user_intent"]
             elif m.payload.get("intent"):
                 prev_user_intent = m.payload["intent"]
-            if m.payload.get("reported_symptoms"):
-                prev_reported_symptoms = list(dict.fromkeys(prev_reported_symptoms + (m.payload["reported_symptoms"] or [])))
+            if "reported_symptoms" in m.payload:
+                prev_reported_symptoms = m.payload["reported_symptoms"] or []
+            if m.payload.get("health_status") == "HEALTHY":
+                prev_reported_symptoms = []
             if m.payload.get("extracted_entities"):
                 prev_extracted.update(m.payload["extracted_entities"])
 
@@ -371,6 +376,7 @@ async def chat_diagnostic(
         "user_intent": final_state.get("user_intent"),
         "intent": final_state.get("intent") or final_state.get("user_intent"),
         "reported_symptoms": final_state.get("reported_symptoms", []),
+        "is_recovery_reported": final_state.get("is_recovery_reported", False),
     }
 
     new_plant_id = final_state.get("plant_id")
