@@ -165,7 +165,7 @@ const parsedMarkdown = computed(() => {
 
       <!-- Parsed Extracted Entities Badges -->
       <div
-        v-if="isAgent && message.extracted_entities && (message.extracted_entities.species_query || message.extracted_entities.species_id || message.extracted_entities.substrate_query || message.extracted_entities.substrate_type || (message.extracted_entities.health_status && message.extracted_entities.health_status !== 'UNKNOWN'))"
+        v-if="isAgent && message.extracted_entities && (message.extracted_entities.species_query || message.extracted_entities.species_id || message.extracted_entities.substrate_query || message.extracted_entities.substrate_type || message.extracted_entities.trait_confirmed !== undefined || message.trait_confirmed !== undefined || (message.extracted_entities.health_status && message.extracted_entities.health_status !== 'UNKNOWN'))"
         class="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5 text-[11px]"
       >
         <span class="text-slate-400 dark:text-slate-500 font-medium">پارامترهای شناسایی‌شده:</span>
@@ -180,6 +180,18 @@ const parsedMarkdown = computed(() => {
           class="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 rounded-md font-medium"
         >
           بستر: {{ message.extracted_entities.substrate_query || message.extracted_entities.substrate_type }}
+        </span>
+        <span
+          v-if="message.extracted_entities.trait_confirmed === true || message.trait_confirmed === true || (message.extracted_entities.traits_queries && message.extracted_entities.traits_queries.length > 0)"
+          class="px-2 py-0.5 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 rounded-md font-medium"
+        >
+          نوع برگ: ابلق / دورنگ
+        </span>
+        <span
+          v-else-if="message.extracted_entities.trait_confirmed === false || message.trait_confirmed === false"
+          class="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-md font-medium"
+        >
+          نوع برگ: سبز ساده
         </span>
         <span
           v-if="message.extracted_entities.health_status === 'HEALTHY'"

@@ -24,7 +24,12 @@ SYNTHESIS_SYSTEM_PROMPT = """
 ۱. از جملات قالبی، خشک و کلیشه‌ای پرهیز کنید و متناسب با صحبت کاربر به صورت کاملاً طبیعی، هوشمند و صمیمی پاسخ دهید.
 ۲. ایمنی زیستی و سلامت گیاه اولویت مطلق است: در صورت وجود هرگونه آفت، بیماری یا بستر نامناسب، بر توقف فوری کوددهی شیمیایی تاکید کنید و علت علمی (مانند مسمومیت اسمزی و سوختگی ریشه‌ها) و راه‌حل درمانی/اصلاحی را با دلسوزی بیان کنید.
 ۳. در صورتی که برنامه کودی یا راهنمای شرایط نگهداری صادر شده، از داده‌های ارائه‌شده (NPK، EC، لوکس نور، رطوبت، دوره آبیاری) دقیقاً استفاده کرده و آن را با ساختاربندی خوانا و شکیل Markdown (شامل ایموجی‌های مناسب و بولت‌پوینت) بنویسید.
+۴. حفظ پیوستگی طبیعی گفتگو و پرهیز جدی از تکرار سلام:
+- تنها و تنها در پیام اول کل گفتگو مجاز به سلام و معرفی خود هستید.
+- در پیام‌های بعدی و ادامه گفتگو، هرگز مجدداً سلام نکنید («سلام! 🌿» ننویسید) و خود را دوباره معرفی نکنید.
+- از شروع پیام با جملات خشک اداری مانند «مشخصات گیاهت رو با موفقیت ثبت کردم» پرهیز کنید؛ در عوض به شکل زنده، پیوسته و دوستانه با عباراتی مثل «بسیار عالی»، «متوجه شدم»، «خیلی خوب» یا مستقیماً با پاسخ و راهنمایی شروع کنید.
 """.strip()
+
 
 
 class PlantDiagnosticGraph:
@@ -279,6 +284,8 @@ class PlantDiagnosticGraph:
             "health_status": health_status,
             "health_confirmed": health_confirmed,
             "trait_confirmed": trait_confirmed,
+            "foliage_pattern": "variegated" if trait_confirmed is True else ("plain_green" if trait_confirmed is False else None),
+            "foliage_label": "ابلق / دورنگ" if trait_confirmed is True else ("سبز ساده" if trait_confirmed is False else None),
             "reported_symptoms": reported_symptoms,
             "missing_critical_info": [],
         }
@@ -686,7 +693,12 @@ class PlantDiagnosticGraph:
     # Node 6: Synthesize Expert Persian Response (LLM-Powered with Botanical Grounding)
     # =========================================================================
 
-    async def _call_llm_synthesizer(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+    async def _call_llm_synthesizer(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        recent_history: Optional[List[Dict[str, str]]] = None,
+    ) -> Optional[str]:
         """
         Invokes the LLM to generate dynamic, natural, highly-engaging Persian responses
         grounded in the agronomic engine's analytical facts and clinical state with automatic retries.
@@ -694,6 +706,13 @@ class PlantDiagnosticGraph:
         if not self.extractor or not getattr(self.extractor, "client", None) or not getattr(self.extractor, "api_key", None):
             return None
         try:
+            messages = [{"role": "system", "content": system_prompt}]
+            if recent_history:
+                for h in recent_history:
+                    if h.get("role") in ["user", "assistant"] and h.get("content"):
+                        messages.append({"role": h["role"], "content": h["content"]})
+            messages.append({"role": "user", "content": user_prompt})
+
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(3),
                 wait=wait_exponential(multiplier=1, min=1, max=4),
@@ -702,10 +721,7 @@ class PlantDiagnosticGraph:
                 with attempt:
                     coro = self.extractor.client.chat.completions.create(
                         model=self.extractor.model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
+                        messages=messages,
                         temperature=0.4,
                     )
                     response = await asyncio.wait_for(coro, timeout=30.0)
@@ -745,6 +761,8 @@ class PlantDiagnosticGraph:
         else:
             species_name = species_data.get("botanical_info", {}).get("persian_name", "گیاه شما") if species_data else "گیاه شما"
             trait_labels = [t.get("label") for t in (state.get("traits_data") or []) if t.get("label")]
+            if not trait_labels and trait_confirmed is False:
+                trait_labels = ["سبز ساده"]
             plant_desc = f"{species_name} {' '.join(trait_labels)}".strip() if trait_labels else species_name
 
         llm_instruction = ""
@@ -846,7 +864,7 @@ class PlantDiagnosticGraph:
                 "user_message": state.get("user_message", ""),
             }
             llm_instruction = (
-                f"به طور کاملاً طبیعی، صمیمی و خوش‌برخورد از کاربر بپرسید گیاه {plant_desc} او در چه نوع خاک یا بستری کاشته شده است، "
+                f"اگر گفتگو در جریان است از تکرار سلام بپرهیزید. به طور کاملاً طبیعی، صمیمی و خوش‌برخورد از کاربر بپرسید گیاه {plant_desc} او در چه نوع خاک یا بستری کاشته شده است، "
                 "و گزینه‌های متداول مناسب (مانند کوکوپیت-پرلیت، آروئید میکس، خاک باغچه‌ای یا هیدروپونیک) را به عنوان راهنمایی دوستانه مثال بزنید."
             )
             fallback_response = (
@@ -889,15 +907,18 @@ class PlantDiagnosticGraph:
 
         # Branch 5: Trait Disambiguation (Gate 2: Variegated vs Plain Green)
         elif "trait_disambiguation" in missing_slots:
+            substrate_name = substrate_data.get("label", "") if substrate_data else ""
             clinical_data_summary = {
                 "situation": "ابهام در صفت ابلق بودن یا سبز ساده برای تنظیم فرمول کودی.",
                 "plant": species_name,
+                "substrate": substrate_name,
                 "user_message": state.get("user_message", ""),
             }
             llm_instruction = (
-                f"از کاربر بپرسید آیا برگ‌های {species_name} سبز یکدست است یا ابلق (دارای بخش‌های سفید یا کرم‌رنگ)، و با لحنی دوستانه توضیح دهید که نیاز کودی گیاهان ابلق با نوع سبز تفاوت دارد."
+                f"اکیداً مجدداً سلام نکنید. با یک جمله کوتاه و مثبت از بستر انتخابی ({substrate_name}) استقبال کنید و سپس از کاربر بپرسید آیا برگ‌های {species_name} سبز یکدست است یا ابلق (دارای بخش‌های سفید یا کرم‌رنگ)، و با لحنی دوستانه توضیح دهید که نیاز کودی گیاهان ابلق با نوع سبز تفاوت دارد."
             )
             fallback_response = (
+                f"انتخاب بستر **{substrate_name}** برای گیاه شما بسیار مناسب است. 🌱\n\n"
                 f"یک نکته مهم درباره **{species_name}**: آیا برگ‌های گیاه شما **سبز یکدست** است یا **ابلق (دارای بخش‌های سفید یا کرم‌رنگ)**؟\n\n"
                 f"*(نوع تغذیه و نیاز کودی گیاهان ابلق با نوع سبز متفاوت است.)*"
             )
@@ -906,20 +927,31 @@ class PlantDiagnosticGraph:
         elif user_intent == "UNSPECIFIED" or "user_intent" in missing_slots:
             substrate_name = substrate_data.get("label", "") if substrate_data else ""
             sub_text = f" در بستر {substrate_name}" if substrate_name else ""
+            foliage_desc = "سبز ساده" if trait_confirmed is False else ("ابلق" if trait_confirmed is True else "")
+            foliage_text = f" با برگ‌های {foliage_desc}" if foliage_desc else ""
             clinical_data_summary = {
-                "situation": "مشخصات گیاه ثبت شد و کاربر هنوز درخواستی مطرح نکرده است.",
+                "situation": "مشخصات پایه گیاه و بستر تکمیل شده و کاربر هنوز نیت یا هدف خاصی را مطرح نکرده است.",
                 "plant": plant_desc,
+                "foliage_pattern": foliage_desc or "نامشخص",
                 "substrate": substrate_name,
                 "user_message": state.get("user_message", ""),
             }
             llm_instruction = (
-                f"با بیانی گرم، دوستانه و پرانرژی اعلام کنید مشخصات گیاه ({plant_desc}{sub_text}) ثبت شد و بپرسید در حال حاضر چه کمکی از دست شما برمی‌آید "
-                "(مانند دریافت برنامه کودی و تغذیه، عیب‌یابی بیماری و آفت، راهنمای شرایط نگهداری و نور/آبیاری، یا تعویض گلدان و بستر)."
+                f"اطلاعات اولیه گیاه ({plant_desc}{foliage_text}{sub_text}) مشخص شده است. "
+                "اکیداً مجدداً سلام نکنید و هرگز از جملات اداری مانند «مشخصات با موفقیت ثبت شد» استفاده نکنید. "
+                "با بیانی کاملاً زنده، گرم و دوستانه به صحبت کاربر واکنش نشان دهید و بپرسید با توجه به این مشخصات، مایل است کدام مسیر را با هم پیش ببرید "
+                "(مانند دریافت برنامه کودی و تغذیه تخصصی، راهنمای شرایط نگهداری و نور/آبیاری، عیب‌یابی بیماری/آفت، یا تعویض گلدان و اصلاح خاک) تا راهنمایی دقیق را آغاز کنید."
             )
             sub_md = f" در بستر **{substrate_name}**" if substrate_name else ""
+            trait_md = f" ({foliage_desc})" if foliage_desc else ""
             fallback_response = (
-                f"مشخصات گیاه شما ثبت شد: **{plant_desc}{sub_md}** 🌱\n\n"
-                f"در حال حاضر چه کمکی می‌توانم به شما بکنم؟"
+                f"بسیار عالی! مشخصات گیاه شما ({plant_desc}{trait_md}{sub_md}) مشخص شد. 🌱\n\n"
+                f"الان دوست دارید کدام مسیر را با هم پیش ببریم؟\n\n"
+                f"🧪 دریافت برنامه کودی و تغذیه مناسب برای {plant_desc}\n"
+                f"🐛 عیب‌یابی بیماری، آفت یا مشکل برگ/ریشه\n"
+                f"☀️ راهنمای نور، آبیاری و شرایط نگهداری\n"
+                f"🪴 بررسی تعویض گلدان یا اصلاح بستر\n\n"
+                f"فقط بفرمایید کدام موضوع برای شما اولویت دارد تا به طور کامل برایتان تنظیم کنم."
             )
 
         # Branch 7: General Care Guide (Light, Water, Temp, Humidity, Repotting)
@@ -1035,9 +1067,10 @@ class PlantDiagnosticGraph:
 
     async def node_synthesize_response(self, state: PlantCareState) -> Dict[str, Any]:
         system_prompt, user_prompt, fallback_response = self._prepare_synthesis_context(state)
+        recent_history = state.get("recent_history")
 
         if system_prompt and user_prompt:
-            llm_res = await self._call_llm_synthesizer(system_prompt, user_prompt)
+            llm_res = await self._call_llm_synthesizer(system_prompt, user_prompt, recent_history=recent_history)
             if llm_res:
                 return {"final_response": llm_res}
 
@@ -1050,16 +1083,21 @@ class PlantDiagnosticGraph:
         otherwise it streams the deterministic botanical fallback smoothly.
         """
         system_prompt, user_prompt, fallback_response = self._prepare_synthesis_context(state)
+        recent_history = state.get("recent_history")
         streamed_any = False
 
         if system_prompt and user_prompt and self.extractor and getattr(self.extractor, "client", None) and getattr(self.extractor, "api_key", None):
             try:
+                messages = [{"role": "system", "content": system_prompt}]
+                if recent_history:
+                    for h in recent_history:
+                        if h.get("role") in ["user", "assistant"] and h.get("content"):
+                            messages.append({"role": h["role"], "content": h["content"]})
+                messages.append({"role": "user", "content": user_prompt})
+
                 response_stream = await self.extractor.client.chat.completions.create(
                     model=self.extractor.model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                     temperature=0.4,
                     stream=True,
                 )

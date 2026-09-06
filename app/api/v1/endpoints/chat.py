@@ -100,11 +100,21 @@ async def chat_diagnostic_stream(
     )
     await db.flush()
 
+    recent_history = [
+        {
+            "role": "user" if m.sender == "user" else "assistant",
+            "content": m.content,
+        }
+        for m in prior_messages[-6:]
+    ]
+
     initial_state: PlantCareState = {
         "user_id": req.user_id,
         "session_id": active_session_id,
         "user_message": req.message,
         "plant_id": active_plant_id,
+        "recent_history": recent_history,
+        "is_initial_turn": len(prior_messages) == 0,
         "resolved_species_id": prev_species_id,
         "unsupported_species": prev_unsupported_species,
         "resolved_substrate_id": prev_substrate_id,
@@ -301,11 +311,21 @@ async def chat_diagnostic(
         species_request_service=species_req_service,
     )
 
+    recent_history = [
+        {
+            "role": "user" if m.sender == "user" else "assistant",
+            "content": m.content,
+        }
+        for m in prior_messages[-6:]
+    ]
+
     initial_state: PlantCareState = {
         "user_id": req.user_id,
         "session_id": active_session_id,
         "user_message": req.message,
         "plant_id": req.plant_id or (str(session_obj.plant_id) if session_obj.plant_id else None),
+        "recent_history": recent_history,
+        "is_initial_turn": len(prior_messages) == 0,
         "resolved_species_id": prev_species_id,
         "unsupported_species": prev_unsupported_species,
         "resolved_substrate_id": prev_substrate_id,

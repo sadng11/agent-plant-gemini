@@ -73,6 +73,8 @@ class PlantCareState(TypedDict, total=False):
     user_message: str
     plant_id: Optional[str]
     nickname: Optional[str]
+    recent_history: Optional[List[Dict[str, str]]]
+    is_initial_turn: Optional[bool]
 
     # Extracted entity objects
     extracted_entities: Optional[Dict[str, Any]]

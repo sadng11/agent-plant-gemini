@@ -33,6 +33,7 @@ export interface ChatResponse {
   calculated_schedule?: CalculatedSchedule | null;
   missing_slots: string[];
   extracted_entities?: Record<string, any> | null;
+  trait_confirmed?: boolean | null;
 }
 
 export interface StreamStartPayload {
@@ -60,6 +61,7 @@ export interface UIMessage {
   calculated_schedule?: CalculatedSchedule | null;
   missing_slots?: string[];
   extracted_entities?: Record<string, any> | null;
+  trait_confirmed?: boolean | null;
   is_error?: boolean;
   is_failed?: boolean;
   is_sending?: boolean;
