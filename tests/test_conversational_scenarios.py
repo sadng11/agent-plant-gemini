@@ -21,7 +21,7 @@ from app.services.species_request_service import SpeciesRequestService
 @pytest_asyncio.fixture
 async def test_engine() -> AsyncEngine:
     engine = create_async_engine(
-        "sqlite+aiosq lite:///:memory:",
+        "sqlite+aiosqlite:///:memory:",
         echo=False,
         future=True,
     )
@@ -153,7 +153,7 @@ async def test_unsupported_species_carnivorous_plant(db_session: AsyncSession):
     assert result.get("unsupported_species") is not None
     # Verify request was recorded in DB
     species_svc = SpeciesRequestService(session=db_session)
-    records = await species_svc.get_all_requests()
+    records = await species_svc.get_unsupported_species_requests()
     assert len(records) >= 1
     assert any("حشره" in r.raw_query for r in records)
     # Verify agent does not crash or give a hard blunt rejection, but provides general care principles
@@ -180,5 +180,5 @@ async def test_complete_single_turn_variegated_monstera_chlorosis(db_session: As
     assert result["resolved_substrate_id"] == "inert_soilless"
     assert result["trait_confirmed"] is True
     assert result["health_status"] == "SICK_OR_SYMPTOMATIC"
-    assert result["calculated_schedule"] is None  # Blocked!
+    assert result.get("calculated_schedule") is None  # Blocked!
     assert any(term in result["final_response"] for term in ["توقف", "کود", "زردی", "ریشه"])
