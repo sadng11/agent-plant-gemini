@@ -2,7 +2,15 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
-UserIntent = Literal["UNSPECIFIED", "FEEDING_CARE", "DIAGNOSIS_SYMPTOM", "GENERAL_CARE", "RECOVERY_CONFIRMED"]
+UserIntent = Literal[
+    "UNSPECIFIED",
+    "FEEDING_CARE",
+    "DIAGNOSIS_SYMPTOM",
+    "GENERAL_CARE",
+    "RECOVERY_CONFIRMED",
+    "OUT_OF_DOMAIN",
+    "CHITCHAT",
+]
 
 
 class ExtractedPlantEntities(BaseModel):

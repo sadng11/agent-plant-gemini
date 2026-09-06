@@ -20,12 +20,14 @@ EXTRACTION_SYSTEM_PROMPT = """
 - traits_queries: صفات و ویژگی‌های خاص مورفولوژیکی (مانند ابلق، دورنگ، مینیاتوری، variegated)
 - phase_query: فاز زیستی یا فنولوژیکی جاری (مانند رشد رویشی، گل‌دهی، تشکیل میوه، خواب زمستانه)
 - user_goal: هدف یا خواسته کاربر (مانند routine_care, disease_treatment, induce_flowering, repotting, general_consultation)
-- user_intent: نیت اصلی گفت‌وگو (یکی از مقادیر دقیق: UNSPECIFIED, FEEDING_CARE, DIAGNOSIS_SYMPTOM, GENERAL_CARE, RECOVERY_CONFIRMED)
+- user_intent: نیت اصلی گفت‌وگو (یکی از مقادیر دقیق: UNSPECIFIED, FEEDING_CARE, DIAGNOSIS_SYMPTOM, GENERAL_CARE, RECOVERY_CONFIRMED, OUT_OF_DOMAIN, CHITCHAT)
   * UNSPECIFIED: کاربر فقط مشخصات گیاه، خاک یا صفت را معرفی کرده و هنوز سوال یا درخواست مشخصی نپرسیده است (مثل: «مونسترا ابلق در کوکوپیت»، «برگ‌انجیری دارم»، «کوکوپیت»، «ابلق است»).
   * FEEDING_CARE: کاربر صراحتاً درخواست برنامه کودی، دوز کود، جدول تغذیه، تقویت رشد یا خرید کود کرده است (مثل: «برنامه کودی می‌خوام»، «چه کودی بدم؟»، «کوددهی مونسترا»، «دریافت برنامه کودی و تغذیه تخصصی»).
   * DIAGNOSIS_SYMPTOM: کاربر از علائم بیماری، آفت، زردی برگ، لکه قهوه‌ای، سوختگی، قارچ، کنه یا شپشک صحبت می‌کند (مثل: «برگاش زرد شده»، «کنه زده چیکار کنم»، «عیب‌یابی زردی یا آفت»).
   * GENERAL_CARE: کاربر درباره نحوه آبیاری، میزان نور، رطوبت، دما، تعویض خاک/گلدان یا شرایط عمومی نگهداری سوال دارد (مثل: «چقدر آب بدم؟»، «نور مناسب مونسترا چقدره؟»، «شرایط نگهداری»، «راهنمای تعویض گلدان»).
   * RECOVERY_CONFIRMED: کاربر اعلام می‌کند که عارضه یا مشکل گیاه برطرف شده، درمان شده یا به حالت عادی و سلامت بازگشته است (مثل: «مشکل حل شد»، «به حالت عادی بازگشته و حالش کاملا خوبه»، «خوب شده»، «برگ جدید زده و سالمه»).
+  * OUT_OF_DOMAIN: پیام کاربر هیچ ارتباطی با گیاهان، گل، باغبانی و کشاورزی ندارد (مانند قیمت دلار، ارز، طلا، سکه، اخبار، فوتبال، آب و هوا، برنامه‌نویسی یا سوالات متفرقه دیگر).
+  * CHITCHAT: احوال‌پرسی یا تعارفات روزمره صرف بدون پرسیدن سوال یا طرح موضوع گیاهی (مانند «سلام»، «درود»، «خسته نباشید»، «سلام خوبی؟»، «چطوری؟»).
 - health_status: وضعیت سلامت گیاه بر اساس پیام (یکی از مقادیر: HEALTHY, SICK_OR_SYMPTOMATIC, UNKNOWN)
 - health_confirmed: تاییدیه صریح سلامت گیاه توسط کاربر:
   * true: اگر کاربر صریحاً اعلام کند گیاه کاملاً سالم، در حال رشد و بدون آفت/زردی است یا مشکل و عارضه گیاه حل شده و گیاه بهبود یافته است (مانند «کاملاً سالمه»، «مشکلی نداره»، «بدون آفت»، «مشکل حل شد»، «بهبود یافته»، «حالش خوبه»، «برگ جدید داده»)
@@ -252,7 +254,9 @@ class EntityExtractorService:
                 response = await asyncio.wait_for(coro, timeout=8.0)
                 parsed = response.choices[0].message.parsed
                 if parsed is not None:
-                    if parsed.species_query:
+                    if parsed.user_intent in ["OUT_OF_DOMAIN", "CHITCHAT"]:
+                        parsed.missing_critical_info = []
+                    elif parsed.species_query:
                         is_supported = bool(self.resolve_species_id(parsed.species_query))
                         if not is_supported:
                             parsed.unsupported_species = parsed.species_query
@@ -470,14 +474,35 @@ class EntityExtractorService:
         ]):
             user_intent = "GENERAL_CARE"
         else:
-            user_intent = "UNSPECIFIED"
+            # Check Out-of-Domain or ChitChat when no plant entity, substrate, or symptom is detected
+            has_plant_entities = bool(species_q or substrate_q or traits_q or symptoms or has_active_disease_terms)
+            ood_keywords = [
+                "دلار", "ارز", "یورو", "تتر", "طلا", "سکه", "قیمت دلار", "قیمت طلا", "قیمت سکه",
+                "بیت کوین", "بیت‌کوین", "کریپتو", "سهام", "بورس", "فوتبال", "استقلال",
+                "پرسپولیس", "رئال", "بارسا", "سیاست", "انتخابات", "رئیس جمهور",
+                "هواشناسی", "آب و هوا", "هوا چطوره", "پیش بینی هوا", "کدنویسی",
+                "برنامه‌نویسی", "پایتون", "جاوااسکریپت", "هوش مصنوعی چیست", "فیلم", "آهنگ",
+                "weather", "dollar", "bitcoin", "crypto", "football", "news"
+            ]
+            chitchat_keywords = [
+                "سلام", "درود", "درود بر شما", "سلام علیکم", "خسته نباشید", "خسته نباشی",
+                "صبح بخیر", "عصر بخیر", "شب بخیر", "روز بخیر", "سلام خوبی", "خوبی",
+                "چطوری", "چه خبر", "احوال شما", "حالت چطوره", "سلام فیتو", "hello", "hi", "hey"
+            ]
+            if not has_plant_entities and any(term in msg for term in ood_keywords):
+                user_intent = "OUT_OF_DOMAIN"
+            elif not has_plant_entities and any(term in msg for term in chitchat_keywords):
+                user_intent = "CHITCHAT"
+            else:
+                user_intent = "UNSPECIFIED"
 
         # 9. Missing Critical Info
         missing: List[str] = []
-        if not species_q:
-            missing.append("species")
-        if user_intent == "FEEDING_CARE" and not substrate_q:
-            missing.append("substrate")
+        if user_intent not in ["OUT_OF_DOMAIN", "CHITCHAT"]:
+            if not species_q:
+                missing.append("species")
+            if user_intent == "FEEDING_CARE" and not substrate_q:
+                missing.append("substrate")
 
         return ExtractedPlantEntities(
             species_query=species_q,

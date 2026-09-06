@@ -257,7 +257,11 @@ class PlantDiagnosticGraph:
         new_intent = new_extracted_obj.user_intent or new_extracted_obj.intent or "UNSPECIFIED"
         prev_intent = state.get("user_intent") or state.get("intent")
 
-        if health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or new_intent == "DIAGNOSIS_SYMPTOM":
+        if new_intent == "OUT_OF_DOMAIN":
+            user_intent = "OUT_OF_DOMAIN"
+        elif new_intent == "CHITCHAT":
+            user_intent = "CHITCHAT"
+        elif health_status == "SICK_OR_SYMPTOMATIC" or reported_symptoms or new_intent == "DIAGNOSIS_SYMPTOM":
             user_intent = "DIAGNOSIS_SYMPTOM"
         elif any(term in msg_lower for term in ["کود", "کوددهی", "برنامه کودی", "تغذیه", "تقویت", "npk", "feeding", "fertilizer", "دوز کودی"]):
             user_intent = "FEEDING_CARE"
@@ -268,7 +272,7 @@ class PlantDiagnosticGraph:
         elif new_intent in ["FEEDING_CARE", "GENERAL_CARE"]:
             user_intent = new_intent
         elif new_intent == "UNSPECIFIED":
-            if prev_intent and prev_intent not in ["UNSPECIFIED", "GENERAL_INTRO", "DIAGNOSIS_SYMPTOM"]:
+            if prev_intent and prev_intent not in ["UNSPECIFIED", "GENERAL_INTRO", "DIAGNOSIS_SYMPTOM", "OUT_OF_DOMAIN", "CHITCHAT"]:
                 user_intent = prev_intent
             else:
                 user_intent = "UNSPECIFIED"
@@ -329,17 +333,14 @@ class PlantDiagnosticGraph:
         # 4. Multi-Stage Clinical Gate Slot Filling
         missing_slots: List[str] = []
 
-        if unsupported_species and not species_id:
+        if user_intent in ["OUT_OF_DOMAIN", "CHITCHAT"]:
+            # Out of domain or greeting: do not prompt for plant/substrate slots!
+            missing_slots = []
+        elif unsupported_species and not species_id:
             # Species is not cataloged in Knowledge Base: stop clinical slot collection immediately!
             missing_slots = []
         elif not species_id:
             missing_slots.append("species")
-        elif not substrate_id:
-            # Gate 1b: Substrate
-            missing_slots.append("substrate")
-        elif species_id == "monstera_deliciosa" and trait_confirmed is None:
-            # Gate 2: Trait Disambiguation (For Monstera when trait is not yet confirmed)
-            missing_slots.append("trait_disambiguation")
         elif user_intent == "DIAGNOSIS_SYMPTOM" or health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False:
             # Sick plant needs pathology triage, no further feeding slot needed
             missing_slots = []
@@ -347,11 +348,18 @@ class PlantDiagnosticGraph:
             # General care info requested, no further slot needed
             missing_slots = []
         elif user_intent == "UNSPECIFIED":
-            # All basic parameters known, but user hasn't specified what help they need!
-            missing_slots.append("user_intent")
+            # Species is known, but user hasn't specified intent or substrate yet!
+            # Use "Value-First Onboarding" (Ask about condition/need and invite substrate for digital garden)
+            missing_slots.append("user_intent_and_onboarding")
         elif user_intent == "FEEDING_CARE":
-            # Gate 3: Health Verification (Must confirm health before feeding schedule)
-            if health_confirmed is not True:
+            # Gate 1b: Substrate required for feeding schedule
+            if not substrate_id:
+                missing_slots.append("substrate")
+            elif species_id == "monstera_deliciosa" and trait_confirmed is None:
+                # Gate 2: Trait Disambiguation (For Monstera when trait is not yet confirmed)
+                missing_slots.append("trait_disambiguation")
+            elif health_confirmed is not True:
+                # Gate 3: Health Verification (Must confirm health before feeding schedule)
                 missing_slots.append("health_verification")
 
         merged_extracted["missing_critical_info"] = missing_slots
@@ -859,8 +867,43 @@ class PlantDiagnosticGraph:
         clinical_data_summary: Dict[str, Any] = {}
         fallback_response = ""
 
+        # Branch 0a: Out of Domain (User asking about dollar, crypto, football, weather, etc.)
+        if user_intent == "OUT_OF_DOMAIN":
+            clinical_data_summary = {
+                "situation": "پیام خارج از حوزه گیاه‌پزشکی، باغبانی و اگرونومی است.",
+                "user_message": state.get("user_message", ""),
+            }
+            llm_instruction = (
+                "کاربر پیامی کاملاً نامربوط به حوزه گیاهان، گل، باغبانی، خاک و کشاورزی ارسال کرده است (مانند قیمت ارز، طلا، اخبار، ورزش، سیاست یا برنامه‌نویسی). "
+                "با لحنی بسیار مودبانه، محترمانه و حرفه‌ای پاسخ دهید. به گرمی توضیح دهید که شما «فیتو»، متخصص گیاه‌پزشکی و اگرونومی هستید "
+                "و تخصص شما منحصراً در زمینه مراقبت، سلامت، عارضه‌یابی و تغذیه گیاهان است و به اطلاعات موضوعات دیگر دسترسی ندارید. "
+                "از کاربر دعوت کنید چنانچه سوال یا چالشی در رابطه با گیاهان آپارتمانی، گل‌ها یا بستر کشت خود دارد، با کمال میل در خدمت او هستید."
+            )
+            fallback_response = (
+                "سلام! من **فیتو** هستم؛ مشاور و متخصص بالینی گیاه‌پزشکی و باغبانی شما. 🌱\n\n"
+                "حیطه فعالیت و تخصص من منحصراً مربوط به سلامت، نگهداری، عارضه‌یابی و تغذیه علمی گیاهان است و به اطلاعات موضوعات خارج از این حوزه (مانند مسائل مالی، اخبار یا موضوعات متفرقه) دسترسی ندارم.\n\n"
+                "اگر درباره گل‌ها، گیاهان آپارتمانی، وضعیت برگ و ریشه، یا خاک گلدانتان سوالی دارید، با کمال میل در خدمتم!"
+            )
+
+        # Branch 0b: Chit-chat & Daily Greetings
+        elif user_intent == "CHITCHAT":
+            clinical_data_summary = {
+                "situation": "احوال‌پرسی یا تعارفات روزمره بدون طرح سوال یا مشکل مشخص.",
+                "user_message": state.get("user_message", ""),
+            }
+            llm_instruction = (
+                "کاربر احوال‌پرسی یا تعارفات روزمره ارسال کرده است. "
+                "با لحنی بسیار گرم، پرانرژی و صمیمی پاسخ دهید، خود را دستیار گیاه‌پزشکی فیتو معرفی کنید "
+                "و با اشتیاق بپرسید امروز در زمینه گل‌ها، گیاهان آپارتمانی یا باغچه دیجیتال او چطور می‌توانید به او کمک کنید."
+            )
+            fallback_response = (
+                "سلام و درود! روزتون بخیر و سرشار از انرژی. 🌿✨\n\n"
+                "من **فیتو** هستم؛ دستیار هوشمند و متخصص گیاه‌پزشکی و اگرونومی شما.\n"
+                "امروز چطور می‌تونم در نگهداری، بررسی سلامت یا تغذیه گل و گیاهانتون کمکتون کنم؟"
+            )
+
         # Branch 1: Species is completely unknown / No plant mentioned at all (Initial Welcome)
-        if ("species" in missing_slots or (not species_data and not unsupported_name)) and not unsupported_name:
+        elif ("species" in missing_slots or (not species_data and not unsupported_name)) and not unsupported_name:
             clinical_data_summary = {
                 "situation": "گونه گیاه هنوز مشخص نیست.",
                 "user_message": state.get("user_message", ""),
@@ -885,39 +928,31 @@ class PlantDiagnosticGraph:
             user_msg = state.get("user_message", "")
             is_new_mention = state.get("is_new_unsupported_mention")
             if is_new_mention is None:
-                is_new_mention = any(p in user_msg for p in [unsupported_name, "گیاه", "پتوس", "سانسوریا", "زاموفیلیا", "فیکوس", "آگلونما", "یوکا", "دیفن"])
+                is_new_mention = any(p in user_msg for p in [unsupported_name, "گیاه", "پتوس", "سانسوریا", "زاموفیلیا", "فیکوس", "آگلونما", "یوکا", "دیفن", "حشره"])
 
             clinical_data_summary = {
-                "situation": f"گونه '{unsupported_name}' در پایگاه دانش موجود نیست. درخواست ثبت این گونه در سیستم ذخیره گردید و ادامه مشاوره تخصصی برای آن متوقف شد.",
+                "situation": f"گونه '{unsupported_name}' در پایگاه دانش تخصصی موجود نیست. درخواست ثبت این گونه در سیستم ذخیره گردید.",
                 "plant_name": unsupported_name,
                 "user_message": user_msg,
             }
 
-            if is_new_mention:
-                llm_instruction = (
-                    f"به کاربر با احترام و خوش‌برخورد توضیح دهید که گیاه «{unsupported_name}» او شناسایی شد و درخواست ثبت شناسنامه تخصصی این گونه در دیتابیس سامانه ذخیره گردید تا در آینده تدوین شود. "
-                    f"به طور کاملاً شفاف و مودبانه اعلام کنید که در حال حاضر به دلیل نبود شناسنامه علمی و پروتکل گیاه‌پزشکی این گونه در پایگاه دانش، امکان صدور نسخه و ادامه مشاوره برای آن وجود ندارد. "
-                    f"از کاربر بخواهید در صورت تمایل، نام گیاه پشتیبانی‌شده دیگری (مانند برگ‌انجیری، درخت لیمو و...) را بفرماید. "
-                    f"اکیداً هیچ سوالی درباره خاک، بستر، علائم، نور، آبیاری یا کوددهی نپرسید و هیچ اطلاعات دیگری درخواست نکنید."
-                )
-                fallback_response = (
-                    f"سلام! گیاه **{unsupported_name}** شما شناسایی شد. 🌱\n\n"
-                    f"📋 **اطلاعیه پایگاه دانش:**\n"
-                    f"در حال حاضر شناسنامه علمی و پروتکل تخصصی گیاه **{unsupported_name}** در پایگاه دانش ثبت نشده است. "
-                    f"درخواست ثبت این گونه در سیستم ذخیره گردید تا توسط تیم اگرونومی فایل منبع آن تدوین شود.\n\n"
-                    f"با توجه به عدم وجود داده‌های تخصصی این گونه، امکان ارائه نسخه و ادامه فرآیند مشاوره برای این گیاه وجود ندارد. "
-                    f"در صورت تمایل می‌توانید نام گیاه دیگری (مانند برگ‌انجیری، درخت لیمو و...) را بفرمایید تا شما را راهنمایی کنم."
-                )
-            else:
-                llm_instruction = (
-                    f"به کاربر با احترام و صمیمیت یادآوری کنید که برای گیاه «{unsupported_name}» به دلیل عدم وجود شناسنامه علمی در پایگاه دانش، امکان ادامه فرآیند مشاوره و دریافت مشخصات خاک یا کوددهی وجود ندارد و درخواست ثبت این گونه قبلاً ذخیره شده است. "
-                    f"از کاربر بخواهید در صورت تمایل نام گیاه پشتیبانی‌شده دیگری را اعلام کند و هیچ سوالی درباره خاک، علائم یا کوددهی نپرسید."
-                )
-                fallback_response = (
-                    f"همان‌طور که اشاره شد، شناسنامه تخصصی گیاه **{unsupported_name}** هنوز در پایگاه دانش ثبت نشده و درخواست آن در سیستم ذخیره گردیده است.\n\n"
-                    f"به همین دلیل امکان ثبت مشخصات خاک یا صدور نسخه کودی برای این گیاه وجود ندارد.\n\n"
-                    f"در صورتی که گیاه دیگری (مانند برگ‌انجیری، درخت لیمو و...) دارید، لطفاً نام آن را بفرمایید تا فرآیند مشاوره آغاز شود."
-                )
+            llm_instruction = (
+                f"کاربر درباره گیاه «{unsupported_name}» صحبت کرده است که هنوز پرونده تخصصی آن در پایگاه دانش ثبت نشده است. "
+                f"با لحنی صمیمی و محترمانه توضیح دهید که گیاه او شناسایی شد و درخواست ثبت شناسنامه تخصصی این گونه در دیتابیس سامانه ذخیره گردید تا در نسخه‌های بعدی تدوین شود. "
+                f"سپس با ذکر سلب مسئولیت تخصصی (اینکه هنوز پرونده بالینی و کودی اختصاصی آن در پایگاه دانش کامل نیست)، بر اساس اصول کلی باغبانی و اگرونومی، راهنمایی‌های عمومی متناسب با شرایط «{unsupported_name}» (مانند نور غیرمستقیم، زمان آبیاری پس از لمس خشکی خاک و زهکش مناسب) ارائه دهید. "
+                f"تاکید کنید که صدور جدول کودی شیمیایی دقیق متوقف است تا از شوک ریشه جلوگیری شود. "
+                f"از کاربر بخواهید اگر گیاه عارضه ظاهری مشخصی دارد بفرماید یا نام گیاه پشتیبانی‌شده دیگری را اعلام کند."
+            )
+            fallback_response = (
+                f"گیاه **{unsupported_name}** شما شناسایی شد. 🌱\n\n"
+                f"📋 **اطلاعیه پایگاه دانش تخصصی:**\n"
+                f"در حال حاضر شناسنامه علمی و پروتکل بالینی اختصاصی گیاه **{unsupported_name}** در پایگاه دانش تدوین نشده و درخواست ثبت آن در سیستم ذخیره گردید تا توسط تیم اگرونومی به دیتابیس اضافه شود.\n\n"
+                f"💡 **اصول کلی مراقبت از {unsupported_name}:**\n"
+                f"- **نور مناسب:** اکثر گیاهان آپارتمانی به نور فیلترشده و غیرمستقیم احتیاج دارند؛ از تابش آفتاب سوزان مستقیم خودداری کنید.\n"
+                f"- **آبیاری و زهکشی:** فواصل آبیاری را بر اساس خشکی ۲ تا ۳ سانتی‌متری عمق خاک تنظیم کرده و از خروج آب مازاد از زهکش مطمئن شوید.\n"
+                f"- **تغذیه کودی:** به دلیل نبود جدول دوز اختصاصی، صدور کود شیمیایی فعلاً متوقف است تا ریسک مسمومیت اسمزی و آسیب به ریشه‌ها پیش نیاید.\n\n"
+                f"اگر گیاه علائم خاصی مثل زردی برگ، لکه یا آفت دارد بفرمایید تا بررسی کنم، یا در صورت تمایل می‌توانید نام گیاه پشتیبانی‌شده دیگری (مانند برگ‌انجیری، درخت لیمو و...) را بفرمایید."
+            )
 
         # Branch 2: Pathology Triage / Sick Plant with Symptoms (BLOCK FERTILIZER)
         elif health_status == "SICK_OR_SYMPTOMATIC" or health_confirmed is False or reported_symptoms or user_intent == "DIAGNOSIS_SYMPTOM":
@@ -1159,36 +1194,59 @@ class PlantDiagnosticGraph:
                 f"*(نوع تغذیه و نیاز کودی گیاهان ابلق با نوع سبز متفاوت است.)*"
             )
 
-        # Branch 6: User Intent is UNSPECIFIED (Information registered, prompt user for goal)
-        elif user_intent == "UNSPECIFIED" or "user_intent" in missing_slots:
+        # Branch 6: User Intent is UNSPECIFIED or Onboarding (Information registered, prompt user for goal)
+        elif user_intent == "UNSPECIFIED" or "user_intent" in missing_slots or "user_intent_and_onboarding" in missing_slots:
             substrate_name = substrate_data.get("label", "") if substrate_data else ""
             sub_text = f" در بستر {substrate_name}" if substrate_name else ""
             foliage_desc = "سبز ساده" if trait_confirmed is False else ("ابلق" if trait_confirmed is True else "")
             foliage_text = f" با برگ‌های {foliage_desc}" if foliage_desc else ""
-            clinical_data_summary = {
-                "situation": "مشخصات پایه گیاه و بستر تکمیل شده و کاربر هنوز نیت یا هدف خاصی را مطرح نکرده است.",
-                "plant": plant_desc,
-                "foliage_pattern": foliage_desc or "نامشخص",
-                "substrate": substrate_name,
-                "user_message": state.get("user_message", ""),
-            }
-            llm_instruction = (
-                f"اطلاعات اولیه گیاه ({plant_desc}{foliage_text}{sub_text}) مشخص شده است. "
-                "اکیداً مجدداً سلام نکنید و هرگز از جملات اداری مانند «مشخصات با موفقیت ثبت شد» استفاده نکنید. "
-                "با بیانی کاملاً زنده، گرم و دوستانه به صحبت کاربر واکنش نشان دهید و بپرسید با توجه به این مشخصات، مایل است کدام مسیر را با هم پیش ببرید "
-                "(مانند دریافت برنامه کودی و تغذیه تخصصی، راهنمای شرایط نگهداری و نور/آبیاری، عیب‌یابی بیماری/آفت، یا تعویض گلدان و اصلاح خاک) تا راهنمایی دقیق را آغاز کنید."
-            )
-            sub_md = f" در بستر **{substrate_name}**" if substrate_name else ""
-            trait_md = f" ({foliage_desc})" if foliage_desc else ""
-            fallback_response = (
-                f"بسیار عالی! مشخصات گیاه شما ({plant_desc}{trait_md}{sub_md}) مشخص شد. 🌱\n\n"
-                f"الان دوست دارید کدام مسیر را با هم پیش ببریم؟\n\n"
-                f"🧪 دریافت برنامه کودی و تغذیه مناسب برای {plant_desc}\n"
-                f"🐛 عیب‌یابی بیماری، آفت یا مشکل برگ/ریشه\n"
-                f"☀️ راهنمای نور، آبیاری و شرایط نگهداری\n"
-                f"🪴 بررسی تعویض گلدان یا اصلاح بستر\n\n"
-                f"فقط بفرمایید کدام موضوع برای شما اولویت دارد تا به طور کامل برایتان تنظیم کنم."
-            )
+
+            if not substrate_data:
+                # Value-First Onboarding: User provided plant name, we ask about their need AND invite substrate for digital garden!
+                clinical_data_summary = {
+                    "situation": f"کاربر گیاه {plant_desc} را معرفی کرده است. پرونده در باغچه دیجیتال در حال تشکیل است.",
+                    "plant": plant_desc,
+                    "user_message": state.get("user_message", ""),
+                }
+                llm_instruction = (
+                    f"کاربر اعلام کرده که گیاه {plant_desc} دارد. "
+                    f"به گرمی و صمیمیت استقبال کنید (اگر پیام اول است سلام کنید، اگر ادامه مکالمه است سلام نکنید). "
+                    f"توضیح دهید که می‌خواهید پرونده این گیاه را در «باغچه دیجیتال» او تشکیل دهید تا شرایطش همیشه پایش شود. "
+                    f"با لحنی دوستانه و غیربازجویانه، دو مورد را جویا شوید: "
+                    f"۱. در حال حاضر وضعیت و حال گیاه چطوره؟ (آیا مشکلی مثل زردی برگ، لکه یا آفت داره، یا برای شرایط نگهداری، نور/آبیاری یا برنامه کودی راهنمایی می‌خواد؟) "
+                    f"۲. ضمناً برای تکمیل پرونده باغچه، بفرمایید در چه خاکی کاشته شده است (مانند کوکوپیت، پرلیت، بستر اروید میکس یا خاک معمولی)."
+                )
+                fallback_response = (
+                    f"سلام! چقدر عالی، **{plant_desc}** یکی از زیباترین گیاهان است. 🌿\n\n"
+                    f"برای اینکه بتوانم پرونده سلامت این گیاه را در **«باغچه دیجیتال شما»** تشکیل بدهم و دقیق‌ترین راهنمایی تخصصی را خدمتتان ارائه کنم:\n\n"
+                    f"۱. در حال حاضر **وضعیت گیاه چطور است؟** (آیا مشکلی مثل زردی برگ، لکه یا آفت مشاهده کردید، یا برای شرایط نگهداری، نور، آبیاری و برنامه کودی راهنمایی می‌خواهید؟)\n"
+                    f"۲. ضمناً برای تکمیل پرونده باغچه، بفرمایید گیاه **در چه نوع خاکی یا بستری** کاشته شده است؟ (مثلاً کوکوپیت و پرلیت، بستر سبک اروید یا خاک معمولی)"
+                )
+            else:
+                clinical_data_summary = {
+                    "situation": "مشخصات پایه گیاه و بستر تکمیل شده و کاربر هنوز نیت یا هدف خاصی را مطرح نکرده است.",
+                    "plant": plant_desc,
+                    "foliage_pattern": foliage_desc or "نامشخص",
+                    "substrate": substrate_name,
+                    "user_message": state.get("user_message", ""),
+                }
+                llm_instruction = (
+                    f"اطلاعات اولیه گیاه ({plant_desc}{foliage_text}{sub_text}) مشخص شده است. "
+                    "اکیداً مجدداً سلام نکنید و هرگز از جملات اداری مانند «مشخصات با موفقیت ثبت شد» استفاده نکنید. "
+                    "با بیانی کاملاً زنده، گرم و دوستانه به صحبت کاربر واکنش نشان دهید و بپرسید با توجه به این مشخصات، مایل است کدام مسیر را با هم پیش ببرید "
+                    "(مانند دریافت برنامه کودی و تغذیه تخصصی، راهنمای شرایط نگهداری و نور/آبیاری، عیب‌یابی بیماری/آفت، یا تعویض گلدان و اصلاح خاک) تا راهنمایی دقیق را آغاز کنید."
+                )
+                sub_md = f" در بستر **{substrate_name}**" if substrate_name else ""
+                trait_md = f" ({foliage_desc})" if foliage_desc else ""
+                fallback_response = (
+                    f"بسیار عالی! مشخصات گیاه شما ({plant_desc}{trait_md}{sub_md}) مشخص شد. 🌱\n\n"
+                    f"الان دوست دارید کدام مسیر را با هم پیش ببریم؟\n\n"
+                    f"🧪 دریافت برنامه کودی و تغذیه مناسب برای {plant_desc}\n"
+                    f"🐛 عیب‌یابی بیماری، آفت یا مشکل برگ/ریشه\n"
+                    f"☀️ راهنمای نور، آبیاری و شرایط نگهداری\n"
+                    f"🪴 بررسی تعویض گلدان یا اصلاح بستر\n\n"
+                    f"فقط بفرمایید کدام موضوع برای شما اولویت دارد تا به طور کامل برایتان تنظیم کنم."
+                )
 
         # Branch 7: General Care Guide (Light, Water, Temp, Humidity, Repotting)
         elif user_intent == "GENERAL_CARE":
